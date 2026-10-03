@@ -1,0 +1,241 @@
+/* ============================================================
+   theme.css — Neural Core Dashboard Design System
+   Single source of truth for all design tokens
+   ============================================================ */
+
+:root {
+    /* === BACKGROUNDS === */
+    --bg: #0A0F1F;
+    /* Main page background */
+    --sidebar-bg: #070B16;
+    /* Sidebar background */
+    --card-bg: #111827;
+    /* Card surfaces */
+    --surface: #1E293B;
+    /* Elevated surfaces, inputs */
+    --surface-low: #0D1320;
+    /* Drawer, deep-dark areas */
+    --surface-mid: rgba(17, 24, 39, 0.6);
+    --surface-dark: rgba(10, 15, 31, 0.5);
+
+    /* === ACCENT COLORS === */
+    --accent: #5B8CFF;
+    /* Intelligence Blue */
+    --accent-dim: rgba(91, 140, 255, 0.1);
+    --accent-dim2: rgba(91, 140, 255, 0.06);
+    --accent-dim3: rgba(91, 140, 255, 0.08);
+    --accent-dim4: rgba(91, 140, 255, 0.15);
+    --accent-dim5: rgba(91, 140, 255, 0.2);
+
+    /* === STATUS COLORS === */
+    --success: #22C55E;
+    --success-dim: rgba(34, 197, 94, 0.06);
+    --success-dim2: rgba(34, 197, 94, 0.15);
+    --warning: #F59E0B;
+    --warning-dim: rgba(245, 158, 11, 0.06);
+    --danger: #EF4444;
+    --danger-dim: rgba(239, 68, 68, 0.06);
+    --danger-dim2: rgba(239, 68, 68, 0.15);
+    --purple: #8B5CF6;
+    --purple-dim: rgba(139, 92, 246, 0.15);
+
+    /* === TEXT === */
+    --text: #E2E8F0;
+    --muted: #94A3B8;
+    --dim: #64748B;
+    --text-danger: #F87171;
+    --text-success: #86EFAC;
+
+    /* === BORDERS === */
+    --border: rgba(91, 140, 255, 0.1);
+    --border-light: rgba(91, 140, 255, 0.08);
+    --border-bright: rgba(91, 140, 255, 0.2);
+    --border-card: rgba(91, 140, 255, 0.06);
+
+    /* === RADIUS === */
+    --radius-sm: 6px;
+    --radius: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 18px;
+
+    /* === FONT === */
+    --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', 'Menlo', monospace;
+
+    /* === TRANSITIONS === */
+    --t-fast: 0.15s ease;
+    --t-base: 0.2s ease;
+    --t-slow: 0.3s ease;
+    --t-drawer: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* === SHADOWS === */
+    --shadow-accent: 0 0 30px rgba(91, 140, 255, 0.3);
+    --shadow-success: 0 0 30px rgba(34, 197, 94, 0.3);
+    --shadow-card: 0 0 12px rgba(0, 0, 0, 0.3);
+}
+
+/* ============================================================
+   BASE RESETS
+   ============================================================ */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+    text-decoration: none;
+    color: inherit;
+}
+
+button {
+    font-family: var(--font);
+    cursor: pointer;
+    border: none;
+    background: none;
+    color: inherit;
+}
+
+input,
+textarea,
+select {
+    font-family: var(--font);
+}
+
+/* ============================================================
+   SCROLLBAR STYLING
+   ============================================================ */
+::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(91, 140, 255, 0.2);
+    border-radius: 99px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(91, 140, 255, 0.35);
+}
+
+/* ============================================================
+   KEYFRAME ANIMATIONS
+   ============================================================ */
+
+/* Pulse — used for status dots */
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.5;
+        transform: scale(0.85);
+    }
+}
+
+/* Spin — used for loading spinner and apply button */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Fade in — used for page transitions */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Slide in from right — drawer */
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Glow pulse — used for accent elements */
+@keyframes glowPulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 12px rgba(91, 140, 255, 0.3);
+    }
+
+    50% {
+        box-shadow: 0 0 24px rgba(91, 140, 255, 0.6);
+    }
+}
+
+/* ============================================================
+   UTILITY CLASSES
+   ============================================================ */
+.hidden {
+    display: none !important;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+}
+
+.mono {
+    font-family: var(--font-mono);
+}
+
+.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Page-level fade in */
+.page-animate {
+    animation: fadeIn 0.3s ease forwards;
+}

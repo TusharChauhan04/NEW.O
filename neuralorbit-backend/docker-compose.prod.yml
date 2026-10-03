@@ -1,0 +1,20 @@
+version: "3.9"
+
+# Production overlay — no live source mount, no --reload, real restart
+# policy. Run alongside docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Secrets (SUPABASE_SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET, LLM API keys)
+# must come from your host's secret manager / env, never from a file
+# committed to git — see neuralorbit-backend/.env.example for the full list.
+
+services:
+  api:
+    command: []          # clear the dev override — use the Dockerfile's own CMD (gunicorn)
+    volumes: []           # no live source mount in production
+    restart: always
+    environment:
+      - APP_ENV=production
+      - AUTH_REQUIRED=true
+
+  redis:
+    restart: always

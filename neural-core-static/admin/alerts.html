@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuralOrbit — Alert Center (Admin)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/layout.css" />
+    <link rel="stylesheet" href="../css/components.css" />
+</head>
+
+<body data-module="alerts" data-role="admin">
+    <div id="app-shell" class="app-shell">
+        <aside id="sidebar" class="sidebar"></aside>
+        <div class="main-area" id="main-area">
+            <header id="topnav" class="topnav"></header>
+            <main id="page-content" class="page-content">
+                <div class="page-loading"><div class="loading-spinner"></div></div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="../js/config.js"></script>
+    <script src="../js/supabase-client.js"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/guard.js"></script>
+    <script src="../js/shell.js"></script>
+    <script src="../js/router.js"></script>
+    <script src="../js/app.js"></script>
+    <script>
+        /* ============================================================
+           admin/alerts.html — Fully Operational Alert Center
+           Backend: GET /api/v1/decisions?limit=50&all=true for live alerts
+                    POST /api/v1/decisions/{id}/override?enabled={bool} to update status
+        ============================================================ */
+
+        const BACKEND = window.BACKEND_URL || 'http://127.0.0.1:8000';
+        let _alerts = [];
+        let _overrides = [];
+        let _usingDemo = false;
+
+        async function apiFetch(path, opts = {}) {
+            try {
+                const token = localStorage.getItem('neuralorbit_token');
+                const res = await fetch(BACKEND + path, {
+                    ...opts,
+                    signal: AbortSignal.timeout(6000),
+                    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.headers || {}) },
+                });
+                if (!res.ok) return null;
+                return await res.json();
+            } catch { return null; }
+        }
+
+        // Severity inference from AI decisions
+        function inferSeverity(d) {
+            const conf = d.confidence || 0;
+            const mod = (d.module || '').toLowerCase();
+            if (mod === 'shield') return conf < 80 ? 'high' : 'medium';
+            if (d.override_enabled) return 'high';
+            if (conf >= 95) return 'low';
+            if (conf >= 85) return 'medium';
+            return 'medium';
+        }
+
+        window.loadAlertsPage = async function () {
+            const content = document.getElementById('page-content');
+            if (!content) return;
+
+            // Skeleton
+            content.innerHTML = `<div style="padding:24px;display:flex;flex-direction:column;gap:16px;">
+                <div style="height:36px;width:280px;border-radius:8px;background:rgba(239,68,68,.08);animation:pulse 1.5s infinite;"></div>
+                ${Array(3).fill('<div style="height:100px;border-radius:14px;background:rgba(239,68,68,.04);animation:pulse 1.5s infinite;"></div>').join('')}
+            </div>`;
+
+            // Try to fetch live decisions and convert to alerts
+            const decisionsData = await apiFetch('/api/v1/decisions?limit=50&all=true');
+
+            if (decisionsData && Array.isArray(decisionsData.decisions) && decisionsData.decisions.length > 0) {
+                _usingDemo = false;
+                // Convert high-priority decisions with overrides or low confidence to "alerts"
+                _alerts = decisionsData.decisions
+                    .filter(d => d.override_enabled || (d.confidence || 0) < 90 || (d.module || '').toLowerCase() === 'shield')
+                    .slice(0, 10)
+                    .map((d, i) => ({
+                        id: d.id || `ALT-${String(i+1).padStart(3,'0')}`,
+                        severity: inferSeverity(d),
+                        module: d.module || 'System',
+                        user: `User ${(d.user_id||'').slice(0,6)}`,
+                        business: 'Platform',
+                        time: d.created_at ? new Date(d.created_at).toLocaleString() : 'Recently',
+                        desc: d.action || 'AI decision flagged for review',
+                        status: d.override_enabled ? 'open' : 'reviewed',
+                        _raw: d,
+                    }));
+
+                if (!_alerts.length) {
+                    // No concerning decisions, show demo
+                    _usingDemo = true;
+                    _alerts = getDemoAlerts();
+                }
+            } else {
+                _usingDemo = true;
+                _alerts = getDemoAlerts();
+            }
+
+            _overrides = getDemoOverrides();
+            renderAlerts();
+        };
+
+        function getDemoAlerts() {
+            return [
+                { id: 'ALT-012', severity: 'critical', module: 'Shield',    user: 'User A', business: 'Account A', time: '10 min ago',  desc: 'Multiple failed authentication attempts detected from unusual IP. Possible brute force attack.', status: 'open' },
+                { id: 'ALT-011', severity: 'high',     module: 'CRM',       user: 'User B', business: 'Account B', time: '1 hour ago',  desc: 'AI override triggered consecutively on lead assignments — possible manual correction pattern.', status: 'open' },
+                { id: 'ALT-010', severity: 'medium',   module: 'Marketing', user: 'User C', business: 'Account C', time: '3 hours ago', desc: 'Ad budget exhausted 40% faster than predicted. AI has paused bidding pending review.', status: 'reviewed' },
+                { id: 'ALT-009', severity: 'low',      module: 'Website',   user: 'User D', business: 'Account D', time: '6 hours ago', desc: 'A/B test variant B serving at 52% instead of 50% split. Rounding correction applied.', status: 'dismissed' },
+                { id: 'ALT-008', severity: 'high',     module: 'Shield',    user: 'User E', business: 'Account E', time: '1 day ago',   desc: 'Account suspension triggered. AI paused. All active workflows halted pending admin review.', status: 'escalated' },
+            ];
+        }
+
+        function getDemoOverrides() {
+            return [
+                { user: 'User A', business: 'Account A', module: 'CRM',         setting: 'Autonomy Level',  from: 'Autonomous', to: 'Assist',    admin: 'You', time: '2 days ago' },
+                { user: 'User E', business: 'Account E', module: 'All Modules', setting: 'Account Status',  from: 'Active',     to: 'Suspended', admin: 'You', time: '14 days ago' },
+            ];
+        }
+
+        function renderAlerts() {
+            const content = document.getElementById('page-content');
+            if (!content) return;
+
+            const sevCfg = {
+                critical: { color: '#EF4444', bg: 'rgba(239,68,68,0.12)', icon: 'bi-x-octagon-fill' },
+                high: { color: '#F59E0B', bg: 'rgba(245,158,11,0.12)', icon: 'bi-exclamation-triangle-fill' },
+                medium: { color: '#5B8CFF', bg: 'rgba(91,140,255,0.12)', icon: 'bi-exclamation-circle-fill' },
+                low: { color: '#94A3B8', bg: 'rgba(148,163,184,0.12)', icon: 'bi-info-circle-fill' },
+            };
+            const statCfg = {
+                open: { color: '#EF4444', label: 'Open' },
+                reviewed: { color: '#22C55E', label: 'Reviewed' },
+                dismissed: { color: '#94A3B8', label: 'Dismissed' },
+                escalated: { color: '#F59E0B', label: 'Escalated' },
+            };
+            const modColors = { CRM: '#5B8CFF', Marketing: '#8B5CF6', Shield: '#F59E0B', Website: '#22C55E' };
+            const openCount = _alerts.filter(a => a.status === 'open').length;
+
+            content.innerHTML = `
+            <div class="page-animate" style="padding:24px;display:flex;flex-direction:column;gap:24px;">
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+                    <div>
+                        <h1 class="page-title">Alert Center</h1>
+                        <p class="page-subtitle">Global incident feed, overrides, and admin-level controls</p>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        ${_usingDemo ? '<span style="font-size:11px;padding:4px 10px;border-radius:6px;background:rgba(245,158,11,.1);color:#F59E0B;border:1px solid rgba(245,158,11,.2);font-weight:600;">DEMO DATA</span>' : '<span style="font-size:11px;padding:4px 10px;border-radius:6px;background:rgba(34,197,94,.1);color:#22C55E;border:1px solid rgba(34,197,94,.2);font-weight:600;">LIVE</span>'}
+                        <div style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:var(--radius);border:1px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.08);">
+                            <div style="width:8px;height:8px;border-radius:50%;background:#EF4444;${openCount>0?'animation:pulse 1.5s infinite;':''}"></div>
+                            <span style="font-size:12px;font-weight:700;color:#EF4444;">${openCount} OPEN ${openCount===1?'ALERT':'ALERTS'}</span>
+                        </div>
+                        <button id="alerts-refresh-btn" style="padding:8px 14px;border-radius:var(--radius);border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:6px;">
+                            <i class="bi bi-arrow-clockwise" style="font-size:12px;"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Alert Feed -->
+                <div class="card">
+                    <div class="card-title"><i class="bi bi-bell-fill" style="color:var(--danger);"></i> Incident Feed <span style="margin-left:auto;font-size:11px;font-weight:600;color:var(--dim);">${_alerts.length} total</span></div>
+                    <div id="alerts-feed" style="display:flex;flex-direction:column;gap:10px;">
+                        ${buildAlertRows(_alerts, sevCfg, statCfg, modColors)}
+                    </div>
+                </div>
+
+                <!-- Override Log -->
+                <div class="card">
+                    <div class="card-title"><i class="bi bi-sliders" style="color:var(--warning);"></i> Global Override Log</div>
+                    <div style="display:flex;flex-direction:column;gap:10px;">
+                        ${_overrides.map(o => `
+                        <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:14px;padding:14px 18px;border-radius:10px;border:1px solid var(--border);align-items:center;" onmouseover="this.style.background='rgba(91,140,255,.03)'" onmouseout="this.style.background=''">
+                            <div>
+                                <div style="font-size:13px;font-weight:600;color:var(--text);">${o.user}</div>
+                                <div style="font-size:11px;color:var(--dim);">${escHtml(o.business)}</div>
+                            </div>
+                            <div style="font-size:12px;color:var(--muted);">${o.module}</div>
+                            <div style="font-size:12px;color:var(--muted);">${o.setting}</div>
+                            <div style="display:flex;align-items:center;gap:6px;font-size:12px;">
+                                <span style="color:#EF4444;">${escHtml(o.from)}</span>
+                                <i class="bi bi-arrow-right" style="font-size:11px;color:var(--dim);"></i>
+                                <span style="color:#22C55E;">${escHtml(o.to)}</span>
+                            </div>
+                            <div style="font-size:11px;color:var(--dim);">${escHtml(o.admin)} · ${escHtml(o.time)}</div>
+                        </div>`).join('')}
+                    </div>
+                </div>
+            </div>`;
+
+            // Bind all action buttons
+            bindAlertActions(sevCfg, statCfg, modColors);
+            document.getElementById('alerts-refresh-btn')?.addEventListener('click', () => window.loadAlertsPage());
+        }
+
+        function buildAlertRows(alerts, sevCfg, statCfg, modColors) {
+            return alerts.map(a => {
+                const sc = sevCfg[a.severity] || sevCfg.low;
+                const st = statCfg[a.status] || statCfg.open;
+                const mc = modColors[a.module] || '#94A3B8';
+                const isOpen = a.status === 'open';
+                return `
+                <div class="alert-row" data-alert-id="${escHtml(a.id)}" style="padding:18px;border-radius:12px;border:1px solid ${sc.color}20;background:${sc.color}04;display:flex;gap:14px;align-items:flex-start;transition:background .15s;" onmouseover="this.style.background='${sc.color}08'" onmouseout="this.style.background='${sc.color}04'">
+                    <div style="width:36px;height:36px;border-radius:10px;background:${sc.bg};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <i class="bi ${sc.icon}" style="color:${sc.color};font-size:16px;"></i>
+                    </div>
+                    <div style="flex:1;min-width:0;">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                            <span style="font-size:11px;font-weight:700;font-family:monospace;color:var(--dim);">${escHtml(a.id)}</span>
+                            <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;color:${sc.color};background:${sc.bg};text-transform:uppercase;">${escHtml(a.severity)}</span>
+                            <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;color:${mc};background:${mc}18;">${escHtml(a.module)}</span>
+                            <span style="font-size:11px;color:var(--dim);">${escHtml(a.user)} · ${escHtml(a.business)}</span>
+                            <span style="font-size:11px;color:var(--dim);margin-left:auto;">${a.time}</span>
+                        </div>
+                        <p style="font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5;">${escHtml(a.desc)}</p>
+                        <div class="alert-actions-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                            <span class="alert-status-badge" style="font-size:11px;font-weight:600;padding:3px 10px;border-radius:4px;color:${st.color};background:${st.color}15;">${st.label}</span>
+                            ${isOpen ? `
+                                <button class="alert-action-btn" data-id="${escHtml(a.id)}" data-action="reviewed" style="padding:3px 10px;border-radius:4px;border:1px solid var(--border);background:transparent;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;font-family:var(--font);">Mark Reviewed</button>
+                                <button class="alert-action-btn" data-id="${escHtml(a.id)}" data-action="escalated" style="padding:3px 10px;border-radius:4px;border:1px solid var(--border);background:transparent;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;font-family:var(--font);">Escalate</button>
+                                <button class="alert-action-btn" data-id="${escHtml(a.id)}" data-action="dismissed" style="padding:3px 10px;border-radius:4px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.08);font-size:11px;font-weight:600;color:#EF4444;cursor:pointer;font-family:var(--font);">Dismiss</button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>`;
+            }).join('') || '<div style="padding:40px;text-align:center;color:var(--dim);"><i class="bi bi-check-circle" style="font-size:32px;display:block;margin-bottom:12px;color:#22C55E;"></i><div>No alerts — all systems nominal</div></div>';
+        }
+
+        function bindAlertActions(sevCfg, statCfg, modColors) {
+            document.querySelectorAll('.alert-action-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const alertId = btn.dataset.id;
+                    const newStatus = btn.dataset.action; // 'reviewed' | 'escalated' | 'dismissed'
+                    const alert = _alerts.find(a => a.id === alertId);
+                    if (!alert) return;
+
+                    // Optimistic UI update immediately
+                    alert.status = newStatus;
+                    const st = statCfg[newStatus] || statCfg.open;
+                    const row = document.querySelector(`[data-alert-id="${alertId}"]`);
+                    if (row) {
+                        const badge = row.querySelector('.alert-status-badge');
+                        if (badge) { badge.textContent = st.label; badge.style.color = st.color; badge.style.background = st.color + '15'; }
+                        row.querySelector('.alert-actions-row').innerHTML = `<span class="alert-status-badge" style="font-size:11px;font-weight:600;padding:3px 10px;border-radius:4px;color:${st.color};background:${st.color}15;">${st.label}</span>`;
+                    }
+
+                    // Update open count in header
+                    const openCount = _alerts.filter(a => a.status === 'open').length;
+                    const headerBadge = document.querySelector('[style*="OPEN ALERT"]');
+                    if (headerBadge) headerBadge.textContent = `${openCount} OPEN ${openCount===1?'ALERT':'ALERTS'}`;
+
+                    // Persist to backend if not using demo data and this is a real decision ID
+                    if (!_usingDemo && alert._raw) {
+                        const enabled = newStatus === 'escalated' || newStatus === 'open';
+                        await apiFetch(`/api/v1/decisions/${encodeURIComponent(alertId)}/override?enabled=${enabled}`, { method: 'POST' });
+                    }
+                });
+            });
+        }
+
+        window.addEventListener('router-ready', () => window.loadAlertsPage?.());
+    </script>
+</body>
+
+</html>

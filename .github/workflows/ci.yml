@@ -1,0 +1,124 @@
+name: CI
+
+# Runs on every push and PR to the main branches. Nothing here deploys or
+# touches any environment — it only builds and tests.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Backend — install & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: neuralorbit-backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # matches the Dockerfile base image
+          cache: pip
+          cache-dependency-path: neuralorbit-backend/requirements.txt
+
+      - name: Install dependencies
+        # Also serves as a regression check on requirements.txt itself — a
+        # malformed line here previously broke both this and the Docker build.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Byte-compile all source
+        # Catches syntax errors in modules that no test happens to import.
+        run: python -m compileall -q app
+
+      - name: Run tests
+        # No .env in CI: settings fall back to defaults (APP_ENV=development,
+        # AUTH_REQUIRED=False) and every DB call is mocked in tests/conftest.py,
+        # so no Supabase project or secret is needed.
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend — syntax check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check standalone JS files parse
+        run: |
+          cd neural-core-static
+          for f in js/*.js tracker.js; do
+            node --check "$f"
+          done
+          echo "All standalone JS files parse."
+
+      - name: Check inline <script> blocks parse
+        # This project has no bundler, so nothing else would ever catch a
+        # syntax error in an inline script — and a real one (an unclosed
+        # handler in admin/users.html) silently disabled an entire admin page,
+        # because a script block that fails to parse executes none of its code.
+        run: |
+          cd neural-core-static
+          node -e "
+          const fs = require('fs'), path = require('path');
+          function walk(dir) {
+            let out = [];
+            for (const f of fs.readdirSync(dir)) {
+              const p = path.join(dir, f);
+              if (fs.statSync(p).isDirectory()) out = out.concat(walk(p));
+              else if (f.endsWith('.html')) out.push(p);
+            }
+            return out;
+          }
+          let failed = false;
+          for (const file of walk('.')) {
+            const html = fs.readFileSync(file, 'utf8');
+            const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g;
+            let m, i = 0;
+            while ((m = re.exec(html))) {
+              i++;
+              try { new Function(m[1]); }
+              catch (e) { failed = true; console.error(file + ' (inline script #' + i + '): ' + e.message); }
+            }
+          }
+          if (failed) { console.error('Inline script syntax check FAILED'); process.exit(1); }
+          console.log('All inline scripts parse.');
+          "
+
+  secret-scan:
+    name: Guard — no secrets committed
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail if a real .env is committed
+        run: |
+          if git ls-files --error-unmatch neuralorbit-backend/.env >/dev/null 2>&1; then
+            echo "::error::neuralorbit-backend/.env is tracked in git. It must stay gitignored."
+            exit 1
+          fi
+          echo "No tracked .env — OK."
+
+      - name: Fail if .env.example contains real-looking credentials
+        # .env.example is intentionally committed, so it's the one file where a
+        # real secret can slip in unnoticed. This is exactly how the original
+        # leak happened.
+        run: |
+          f=neuralorbit-backend/.env.example
+          if grep -Eq 'SUPABASE_SERVICE_ROLE_KEY=ey|SUPABASE_JWT_SECRET=[A-Za-z0-9+/]{40,}' "$f"; then
+            echo "::error::$f appears to contain a real key/secret rather than a placeholder."
+            exit 1
+          fi
+          echo "$f contains placeholders only — OK."

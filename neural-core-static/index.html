@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeuralOrbit — Sign In & Register</title>
+
+    <!-- Poppins Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+
+    <!-- Bootstrap & Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    
+    <!-- Supabase Library (Priority Load) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Poppins', sans-serif;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0b0b15;
+            /* Deeper dark for premium feel */
+            overflow-x: hidden;
+            color: #fff;
+        }
+
+        /* Professional Size: 850x580 (Slightly taller for demo info) */
+        .auth-container {
+            position: relative;
+            width: 850px;
+            height: 620px;
+            background: #1a1a2e;
+            border-radius: 20px;
+            box-shadow: 0 0 50px rgba(6, 182, 212, 0.25);
+            overflow: hidden;
+        }
+
+        /* Diagonal Teal Panel - Brand Color #06B6D4 */
+        .brand-bg {
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            top: -50%;
+            left: -50%;
+            background: linear-gradient(45deg, transparent 52%, #06B6D4 52%);
+            transition: transform 0.8s cubic-bezier(0.7, 0, 0.3, 1);
+            z-index: 1;
+        }
+
+        .auth-container.active .brand-bg {
+            transform: rotate(-90deg);
+            background: linear-gradient(45deg, transparent 52%, #06B6D4 52%);
+        }
+
+        /* Form Boxes */
+        .form-box {
+            position: absolute;
+            width: 50%;
+            height: 100%;
+            top: 0;
+            padding: 40px 45px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        .login-box {
+            left: 0;
+        }
+
+        .register-box {
+            right: 0;
+        }
+
+        /* Animations */
+        .animation {
+            transition: all 0.7s ease;
+            transition-delay: calc(0.1s * var(--i));
+        }
+
+        .login-box .animation {
+            transform: translateX(0);
+            opacity: 1;
+            filter: blur(0);
+        }
+
+        .register-box .animation {
+            transform: translateX(120%);
+            opacity: 0;
+            filter: blur(10px);
+        }
+
+        .auth-container.active .login-box .animation {
+            transform: translateX(-120%);
+            opacity: 0;
+            filter: blur(10px);
+        }
+
+        .auth-container.active .register-box .animation {
+            transform: translateX(0);
+            opacity: 1;
+            filter: blur(0);
+        }
+
+        /* Form Styling */
+        .form-box h2 {
+            color: #fff;
+            font-size: 26px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            letter-spacing: -0.5px;
+        }
+
+        .login-box h2 {
+            text-align: left;
+        }
+
+        .register-box h2 {
+            text-align: right;
+        }
+
+        .input-group-custom {
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .input-group-custom input {
+            width: 100%;
+            padding: 10px 40px 10px 0;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.15);
+            color: #fff;
+            font-size: 14px;
+            outline: none;
+            transition: border-bottom 0.3s;
+        }
+
+        .input-group-custom input:focus {
+            border-bottom: 2px solid #06B6D4;
+        }
+
+        .input-group-custom input::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .input-group-custom i {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 18px;
+        }
+
+        .btn-auth {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(90deg, #06B6D4, #0ea5e9);
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 5px;
+            box-shadow: 0 4px 15px rgba(6, 182, 212, 0.25);
+            transition: transform 0.2s, opacity 0.2s;
+        }
+
+        .btn-auth:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .btn-auth:active {
+            transform: translateY(0);
+        }
+
+        .btn-auth:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .switch-text {
+            text-align: center;
+            margin-top: 20px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+        }
+
+        .switch-text a {
+            color: #06B6D4;
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+
+        /* Welcome Panels */
+        .welcome-panel {
+            position: absolute;
+            width: 50%;
+            height: 100%;
+            top: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 40px 40px;
+            z-index: 5;
+            color: #fff;
+            transition: all 0.8s cubic-bezier(0.7, 0, 0.3, 1);
+        }
+
+        .welcome-right {
+            right: 0;
+            text-align: right;
+            align-items: flex-end;
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .welcome-left {
+            left: 0;
+            text-align: left;
+            align-items: flex-start;
+            opacity: 0;
+            transform: translateX(-30px);
+        }
+
+        .auth-container.active .welcome-right {
+            opacity: 0;
+            transform: translateX(30px);
+        }
+
+        .auth-container.active .welcome-left {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .welcome-panel h1 {
+            font-size: 34px;
+            font-weight: 800;
+            margin-bottom: 15px;
+            line-height: 1.1;
+            text-transform: uppercase;
+            letter-spacing: -1px;
+        }
+
+        .welcome-panel p {
+            font-size: 12px;
+            line-height: 1.6;
+            color: rgba(255, 255, 255, 0.9);
+            max-width: 290px;
+            opacity: 0.8;
+        }
+
+        /* Branding Logo Area */
+        .brand-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .logo-left {
+            justify-content: flex-start;
+        }
+
+        .logo-right {
+            justify-content: flex-end;
+        }
+
+        .brand-logo svg {
+            color: #06B6D4;
+        }
+
+        .brand-name {
+            font-weight: 700;
+            letter-spacing: 1px;
+            font-size: 16px;
+            min-width: max-content;
+        }
+
+        .brand-name span {
+            color: #06B6D4;
+        }
+
+        /* Demo Chip */
+        .demo-chip {
+            margin-top: 15px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.4);
+            text-align: center;
+            line-height: 1.5;
+        }
+
+        .demo-chip b {
+            color: #06B6D4;
+            opacity: 0.8;
+        }
+
+        /* Status Messages */
+        .auth-status {
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+            animation: slideDown 0.3s ease;
+        }
+
+        .auth-status.error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .auth-status.success {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+
+        @keyframes slideDown {
+            from {
+                transform: translateY(-10px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .btn-spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @media (max-width: 800px) {
+            .auth-container {
+                width: 95%;
+                height: 550px;
+            }
+
+            .welcome-panel {
+                display: none;
+            }
+
+            .form-box {
+                width: 100%;
+                border-radius: 20px;
+            }
+
+            .brand-bg,
+            .auth-container.active .brand-bg {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="auth-container" id="authContainer">
+        <!-- Brand Diagonal BG -->
+        <div class="brand-bg"></div>
+
+        <!-- LOGIN PANEL -->
+        <div class="form-box login-box">
+            <div class="brand-logo logo-left animation" style="--i:0">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
+                    <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
+                    <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
+                    <path d="M12 18v-5" />
+                </svg>
+                <div class="brand-name">NEURAL<span>ORBIT</span></div>
+            </div>
+
+            <h2 class="animation" style="--i:1">Welcome Back</h2>
+
+            <div id="auth-error" class="auth-status error">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+                <span id="auth-error-msg"></span>
+            </div>
+
+            <form id="login-form">
+                <div class="input-group-custom animation" style="--i:2">
+                    <input type="email" id="login-email" placeholder="Email Address" aria-label="Email Address" autocomplete="email" required>
+                    <i class="bi bi-envelope-fill" aria-hidden="true"></i>
+                </div>
+                <div class="input-group-custom animation" style="--i:3">
+                    <input type="password" id="login-password" placeholder="Password" aria-label="Password" autocomplete="current-password" required>
+                    <i class="bi bi-lock-fill" aria-hidden="true"></i>
+                </div>
+                <button type="submit" id="login-btn" class="btn-auth animation" style="--i:4">Sign In</button>
+                <div class="switch-text animation" style="--i:5">
+                    Don't have a space?<a onclick="toggleAuth()">Create one</a>
+                </div>
+                <!-- Developer Note: Demo accounts are still active for internal testing -->
+            </form>
+        </div>
+
+        <!-- REGISTER PANEL -->
+        <div class="form-box register-box">
+            <div class="brand-logo logo-right animation" style="--i:0">
+                <div class="brand-name">NEURAL<span>ORBIT</span></div>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
+                    <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
+                    <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
+                    <path d="M12 18v-5" />
+                </svg>
+            </div>
+
+            <h2 class="animation" style="--i:1">New Workspace</h2>
+            <form id="register-form">
+                <div class="input-group-custom animation" style="--i:2">
+                    <input type="text" id="register-name" placeholder="Full Name" aria-label="Full Name" autocomplete="name" required>
+                    <i class="bi bi-person-fill" aria-hidden="true"></i>
+                </div>
+                <div class="input-group-custom animation" style="--i:3">
+                    <input type="text" id="register-company" placeholder="Company Name (optional)" aria-label="Company Name (optional)" autocomplete="organization">
+                    <i class="bi bi-building" aria-hidden="true"></i>
+                </div>
+                <div class="input-group-custom animation" style="--i:4">
+                    <input type="email" id="register-email" placeholder="Email Address" aria-label="Email Address" autocomplete="email" required>
+                    <i class="bi bi-envelope-fill" aria-hidden="true"></i>
+                </div>
+                <div class="input-group-custom animation" style="--i:5">
+                    <input type="password" id="register-password" placeholder="Password" aria-label="Password" autocomplete="new-password" required>
+                    <i class="bi bi-lock-fill" aria-hidden="true"></i>
+                </div>
+                <button type="submit" id="register-btn" class="btn-auth animation" style="--i:6">Register</button>
+                <div class="switch-text animation" style="--i:7">
+                    Already operational?<a onclick="toggleAuth()">Sign In</a>
+                </div>
+            </form>
+        </div>
+
+        <!-- WELCOME SIDE PANELS -->
+        <div class="welcome-panel welcome-right">
+            <h1 class="animation" style="--i:1">Scale with<br>Intention.</h1>
+            <p class="animation" style="--i:2">The next-generation AI Operating System for decentralized enterprise
+                scaling.</p>
+        </div>
+
+        <div class="welcome-panel welcome-left">
+            <h1 class="animation" style="--i:1">Infinite<br>Expansion.</h1>
+            <p class="animation" style="--i:2">Join the orbit. Automate your growth with intentional AI agents and
+                real-time scaling.</p>
+        </div>
+    </div>
+
+    <!-- Scripts (Supabase library already loaded in <head>) -->
+    <script src="js/config.js?v=final_v3.0"></script>
+    <script src="js/supabase-client.js?v=final_v3.0"></script>
+    <script src="js/auth.js?v=final_v3.0"></script>
+    <script src="js/api.js?v=final_v3.0"></script>
+
+    <script>
+        function toggleAuth() {
+            document.getElementById('authContainer').classList.toggle('active');
+            // Hide errors when switching
+            const err = document.getElementById('auth-error');
+            if (err) err.style.display = 'none';
+        }
+
+        // Expose to auth.js
+        window.toggleAuth = toggleAuth;
+
+        // Init the page logic from auth.js
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.initLoginPage) window.initLoginPage();
+        });
+    </script>
+</body>
+
+</html>

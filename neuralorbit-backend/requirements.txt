@@ -1,0 +1,57 @@
+# NeuralOrbit Backend — Requirements
+#
+# PINNED for reproducible builds. Previously only httpx had a constraint, so
+# two builds a week apart produced different images — and the httpx/Supabase
+# conflict warned about below was one `pip install` away from returning.
+#
+# Versions below are the ones the 49-test suite actually passes against.
+# CI (.github/workflows/ci.yml) installs this file on Linux/Python 3.11 —
+# matching the Dockerfile — so an incompatible pin fails there, not in prod.
+#
+# To upgrade: change a pin deliberately, run the tests, let CI confirm.
+
+# ── Core Framework ────────────────────────────────────
+fastapi==0.135.1
+uvicorn[standard]==0.42.0
+
+# ── Supabase ──────────────────────────────────────────
+# Constrains httpx to <0.26 — see the httpx pin below before changing this.
+supabase==2.3.8
+
+# ── Auth / JWT ────────────────────────────────────────
+python-jose[cryptography]==3.5.0
+
+# ── Settings / Config ─────────────────────────────────
+pydantic-settings==2.13.1
+python-dotenv==1.2.2
+
+# ── HTTP ──────────────────────────────────────────────
+# DO NOT raise httpx to >=0.26 — it breaks the Supabase client.
+# NOTE: no quotes. A requirements file is not shell-parsed; literal quotes
+# make pip reject the line and previously broke both `pip install -r` and
+# the Docker build entirely.
+httpx[http2]==0.25.2
+python-multipart==0.0.22
+
+# ── AI Intelligence & Scheduler ───────────────────────
+apscheduler==3.11.2
+openai==2.31.0
+# Gemini: google-generativeai, not google-genai — the latter needs
+# httpx>=0.28, which conflicts with Supabase's <0.26 ceiling.
+google-generativeai==0.8.6
+anthropic==0.100.0
+
+# ── Production server ─────────────────────────────────
+# Runs only in the Linux container (gunicorn has no Windows support), so it is
+# validated by CI and the Docker build rather than local Windows development.
+gunicorn==23.0.0
+
+# ── Dev / Testing ─────────────────────────────────────
+pytest==9.1.1
+pytest-asyncio==1.4.0
+
+# ── Phase 2 (uncomment when ready) ────────────────────
+# celery
+# redis
+# scikit-learn
+# numpy

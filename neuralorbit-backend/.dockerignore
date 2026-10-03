@@ -1,0 +1,66 @@
+# =============================================================================
+#  Docker build context exclusions
+#
+#  CRITICAL: .gitignore has NO effect on the Docker build context. Without this
+#  file, the Dockerfile's `COPY . .` copies the developer's real .env — which
+#  holds a live Supabase service-role key and JWT secret — into the image, where
+#  it persists in the layer history even if deleted later. Worse, app/config.py
+#  sets `env_file = ".env"`, so the container would then READ it and silently
+#  boot with development defaults (auth disabled, CORS wildcard).
+#
+#  Verify after building:  docker run --rm <image> ls -la /app/.env
+#  Expected:               "No such file or directory"
+# =============================================================================
+
+# ── Secrets — never copy these ───────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── Version control (the leaked secret lives in this history) ────────────────
+.git
+.gitignore
+
+# ── Python bytecode / caches ─────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.Python
+build/
+dist/
+
+# ── Virtual environments ─────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Tests & tooling (not needed at runtime; keeps the image smaller) ─────────
+tests/
+pytest.ini
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ── Docs & local scripts ─────────────────────────────────────────────────────
+*.md
+!README.md
+scripts/
+migrations/
+
+# ── Editor / OS noise ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuralOrbit — AI Command Center (Admin)</title>
+    <meta name="description" content="NeuralOrbit Admin AI Command Center — global system overview" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/layout.css" />
+    <link rel="stylesheet" href="../css/components.css" />
+    <style>
+        .cmd-stat-card {
+            padding: 20px; border-radius: 14px; border: 1px solid var(--border);
+            background: rgba(17,24,39,.7); display: flex; flex-direction: column; gap: 10px;
+            transition: border-color .15s;
+        }
+        .cmd-stat-card:hover { border-color: rgba(91,140,255,.3); }
+        .mod-bar-row {
+            display: grid; grid-template-columns: 90px 1fr 50px 54px;
+            align-items: center; gap: 12px; padding: 10px 14px;
+            border-radius: 10px; border: 1px solid var(--border-light);
+            transition: background .12s;
+        }
+        .mod-bar-row:hover { background: rgba(91,140,255,.04); }
+        .bar-track { height: 6px; border-radius: 3px; background: rgba(255,255,255,.06); overflow: hidden; }
+        .bar-fill  { height: 100%; border-radius: 3px; transition: width .5s ease; }
+        .live-dec-row {
+            display: grid; grid-template-columns: 1fr 90px 80px 80px;
+            align-items: center; gap: 12px; padding: 12px 16px;
+            border-bottom: 1px solid rgba(91,140,255,.04);
+            cursor: pointer; transition: background .12s;
+        }
+        .live-dec-row:hover { background: rgba(91,140,255,.04); }
+    </style>
+</head>
+
+<body data-module="neural-orbit" data-role="admin">
+    <div id="app-shell" class="app-shell">
+        <aside id="sidebar" class="sidebar"></aside>
+        <div class="main-area" id="main-area">
+            <header id="topnav" class="topnav"></header>
+            <main id="page-content" class="page-content">
+                <div class="page-loading"><div class="loading-spinner"></div></div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="../js/config.js"></script>
+    <script src="../js/supabase-client.js"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/guard.js"></script>
+    <script src="../js/shell.js"></script>
+    <script src="../js/router.js"></script>
+    <script src="../js/app.js"></script>
+    <script>
+        /* ============================================================
+           admin/neural-orbit.html — AI Command Center
+           Reads from EXISTING endpoints only:
+             GET /health
+             GET /api/v1/decisions?all=true&limit=10
+             GET /api/v1/analytics/overview?module=X
+             GET /api/v1/admin/scheduler/status   (Phase A — new)
+           ZERO user pages or user JS files modified.
+        ============================================================ */
+        const BACKEND = window.BACKEND_URL || 'http://127.0.0.1:8000';
+        const MOD_META = {
+            crm:       { label: 'CRM',       color: '#5B8CFF', icon: 'bi-people' },
+            marketing: { label: 'Marketing',  color: '#8B5CF6', icon: 'bi-megaphone' },
+            shield:    { label: 'Shield',     color: '#F59E0B', icon: 'bi-shield-fill' },
+            website:   { label: 'Website',    color: '#22C55E', icon: 'bi-globe' },
+        };
+        const OUT_C = { pending: '#5B8CFF', applied: '#22C55E', rejected: '#EF4444' };
+
+        async function apiFetch(path) {
+            try {
+                const token = localStorage.getItem('neuralorbit_token');
+                const res = await fetch(BACKEND + path, {
+                    signal: AbortSignal.timeout(6000),
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                if (!res.ok) return null;
+                return await res.json();
+            } catch { return null; }
+        }
+
+        window.loadNeuralOrbitAdminPage = async function () {
+            const content = document.getElementById('page-content');
+            if (!content) return;
+
+            // Skeleton
+            content.innerHTML = `<div style="padding:24px;display:flex;flex-direction:column;gap:16px;">
+                <div style="height:48px;width:320px;border-radius:10px;background:rgba(91,140,255,.08);animation:pulse 1.5s infinite;"></div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;">
+                    ${Array(4).fill('<div style="height:100px;border-radius:14px;background:rgba(91,140,255,.05);animation:pulse 1.5s infinite;"></div>').join('')}
+                </div>
+                ${Array(2).fill('<div style="height:200px;border-radius:14px;background:rgba(91,140,255,.03);animation:pulse 1.5s infinite;"></div>').join('')}
+            </div>`;
+
+            // Parallel fetch everything
+            const [health, decisionsData, schedStatus, ...moduleOvs] = await Promise.all([
+                apiFetch('/health'),
+                apiFetch('/api/v1/decisions?all=true&limit=10'),
+                apiFetch('/api/v1/admin/scheduler/status'),
+                ...Object.keys(MOD_META).map(m => apiFetch(`/api/v1/analytics/overview?module=${m}`)),
+            ]);
+
+            const backendOK  = health?.status === 'ok';
+            const decisions  = decisionsData?.decisions || [];
+            const pending    = decisions.filter(d => d.outcome === 'pending').length;
+            const isRunning  = schedStatus?.is_running ?? false;
+
+            // Module accuracy from analytics
+            const modStats = Object.keys(MOD_META).map((m, i) => {
+                const ov   = moduleOvs[i];
+                const conf = ov?.kpis?.find(k => k.title === 'Avg AI Confidence')?.value;
+                const dec  = ov?.kpis?.find(k => k.title === 'AI Decisions Made')?.value;
+                return {
+                    key:       m,
+                    ...MOD_META[m],
+                    accuracy:  conf ? parseInt(conf) : null,
+                    decisions: dec  || 0,
+                    hasData:   !!ov?.has_data,
+                };
+            });
+
+            // Avg accuracy across modules with data
+            const withData = modStats.filter(m => m.accuracy !== null);
+            const avgAcc   = withData.length
+                ? Math.round(withData.reduce((s, m) => s + m.accuracy, 0) / withData.length)
+                : null;
+
+            // Total users from any autonomy data we can infer (fallback to decision user uniq)
+            const uniqueUsers = [...new Set(decisions.map(d => d.user_id))].length;
+
+            // Scheduler info
+            const nextRun = schedStatus?.next_run
+                ? `Next in ${Math.max(0, Math.round((new Date(schedStatus.next_run) - Date.now()) / 60000))} min`
+                : 'Offline';
+            const lastRunRes = schedStatus?.last_result;
+
+            content.innerHTML = `
+            <div class="page-animate" style="padding:24px;display:flex;flex-direction:column;gap:24px;">
+
+                <!-- Header -->
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div>
+                        <h1 class="page-title">AI Command Center</h1>
+                        <p class="page-subtitle">Live overview of AI performance, decisions, and scheduler across all users</p>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        ${backendOK
+                            ? '<span style="font-size:11px;padding:4px 12px;border-radius:6px;background:rgba(34,197,94,.1);color:#22C55E;border:1px solid rgba(34,197,94,.2);font-weight:600;display:flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:50%;background:#22C55E;animation:pulse 1.5s infinite;display:inline-block;"></span>LIVE</span>'
+                            : '<span style="font-size:11px;padding:4px 12px;border-radius:6px;background:rgba(239,68,68,.1);color:#EF4444;border:1px solid rgba(239,68,68,.2);font-weight:600;">BACKEND OFFLINE</span>'}
+                        <button onclick="window.loadNeuralOrbitAdminPage()"
+                            style="padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:6px;">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Global stat cards -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;">
+                    ${[
+                        { label: 'Backend',       value: backendOK ? 'Online' : 'Offline',  sub: `v${health?.version || '—'} · ${health?.env || '—'}`,       color: backendOK ? '#22C55E' : '#EF4444', icon: 'bi-rocket' },
+                        { label: 'Pending Decisions', value: pending, sub: 'Await user action',    color: '#5B8CFF', icon: 'bi-hourglass-split' },
+                        { label: 'Avg AI Accuracy',   value: avgAcc !== null ? avgAcc + '%' : '—', sub: withData.length ? `${withData.length} modules with data` : 'No events yet', color: avgAcc !== null ? (avgAcc >= 80 ? '#22C55E' : avgAcc >= 60 ? '#F59E0B' : '#EF4444') : '#94A3B8', icon: 'bi-graph-up' },
+                        { label: 'Scheduler',     value: isRunning ? '● Running' : '○ Stopped', sub: nextRun,  color: isRunning ? '#22C55E' : '#EF4444', icon: 'bi-clock-history' },
+                    ].map(s => `
+                        <div class="cmd-stat-card">
+                            <div style="display:flex;align-items:center;justify-content:space-between;">
+                                <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;">${s.label}</div>
+                                <i class="bi ${s.icon}" style="color:${s.color};font-size:14px;"></i>
+                            </div>
+                            <div style="font-size:24px;font-weight:700;color:${s.color};font-family:monospace;">${s.value}</div>
+                            <div style="font-size:11px;color:var(--dim);">${s.sub}</div>
+                        </div>`).join('')}
+                </div>
+
+                <!-- Module AI Performance + Live Feed (2-column) -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+                    <!-- Module Performance -->
+                    <div class="card">
+                        <div class="card-title">
+                            <i class="bi bi-diagram-3" style="color:var(--accent);"></i>
+                            Module AI Performance
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:8px;">
+                            ${modStats.map(m => {
+                                const acc = m.accuracy;
+                                const pct = acc !== null ? acc : 0;
+                                const col = acc !== null ? (pct >= 80 ? '#22C55E' : pct >= 60 ? '#F59E0B' : '#EF4444') : '#4B5563';
+                                const grade = acc !== null
+                                    ? (pct >= 90 ? 'A' : pct >= 80 ? 'B' : pct >= 70 ? 'C' : pct >= 60 ? 'D' : 'F')
+                                    : '—';
+                                return `
+                                <div class="mod-bar-row">
+                                    <div style="display:flex;align-items:center;gap:6px;">
+                                        <i class="bi ${m.icon}" style="color:${m.color};font-size:12px;"></i>
+                                        <span style="font-size:12px;font-weight:600;color:var(--text);">${m.label}</span>
+                                    </div>
+                                    <div class="bar-track">
+                                        <div class="bar-fill" style="width:${pct}%;background:${col};"></div>
+                                    </div>
+                                    <span style="font-size:12px;font-weight:700;color:${col};font-family:monospace;text-align:right;">${acc !== null ? acc + '%' : '—'}</span>
+                                    <span style="font-size:13px;font-weight:800;color:${col};text-align:center; border:1px solid ${col}28;border-radius:6px;padding:2px 6px;">${grade}</span>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                        ${!withData.length ? `<div style="margin-top:12px;padding:12px;border-radius:10px;background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.15);">
+                            <div style="font-size:12px;color:#F59E0B;font-weight:600;">No events yet</div>
+                            <div style="font-size:11px;color:var(--dim);margin-top:4px;">Users need to send events via the Tracker to see accuracy data.</div>
+                        </div>` : ''}
+                    </div>
+
+                    <!-- Live Decision Feed -->
+                    <div class="card" style="padding:0;overflow:hidden;">
+                        <div style="padding:18px 20px 14px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;justify-content:space-between;">
+                            <div class="card-title" style="margin:0;">
+                                <i class="bi bi-activity" style="color:var(--accent);"></i>
+                                Live Decision Feed
+                            </div>
+                            <a href="decisions.html" style="font-size:11px;color:var(--accent);text-decoration:none;font-weight:600;">View All →</a>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 90px 80px 80px;gap:12px;padding:9px 16px;border-bottom:1px solid var(--border-light);background:rgba(17,24,39,.7);">
+                            ${['ACTION','MODULE','CONF','STATUS'].map(h =>
+                                `<span style="font-size:9px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;">${h}</span>`
+                            ).join('')}
+                        </div>
+                        <div id="cmd-dec-rows">
+                            ${decisions.length ? decisions.slice(0,8).map(d => {
+                                const mc   = MOD_META[d.module]?.color || '#94A3B8';
+                                const oc   = OUT_C[d.outcome] || '#94A3B8';
+                                const conf = d.confidence || 0;
+                                const confC = conf >= 90 ? '#22C55E' : conf >= 70 ? '#F59E0B' : '#EF4444';
+                                return `
+                                <div class="live-dec-row">
+                                    <div style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(d.action)}">${escHtml(d.action || '—')}</div>
+                                    <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;color:${mc};background:${mc}18;text-transform:capitalize;">${escHtml(d.module || '—')}</span>
+                                    <span style="font-size:12px;font-weight:700;color:${confC};font-family:monospace;">${conf}%</span>
+                                    <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;color:${oc};background:${oc}18;text-transform:capitalize;">${escHtml(d.outcome)}</span>
+                                </div>`;
+                            }).join('') : `
+                            <div style="padding:40px;text-align:center;color:var(--dim);">
+                                <i class="bi bi-journal-text" style="font-size:28px;display:block;margin-bottom:10px;opacity:.4;"></i>
+                                <div style="font-size:13px;">No decisions yet — trigger a manual scan</div>
+                                <a href="analytics.html" style="font-size:12px;color:var(--accent);text-decoration:none;margin-top:8px;display:inline-block;">→ Open Scheduler Control</a>
+                            </div>`}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scheduler summary strip -->
+                <div class="card" style="padding:16px 20px;">
+                    <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <i class="bi bi-clock-history" style="color:var(--accent);"></i>
+                            <span style="font-size:13px;font-weight:600;color:var(--text);">AI Scheduler</span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <div style="width:8px;height:8px;border-radius:50%;background:${isRunning?'#22C55E':'#EF4444'};${isRunning?'animation:pulse 1.5s infinite;':''}"></div>
+                            <span style="font-size:12px;color:${isRunning?'#22C55E':'#EF4444'};font-weight:600;">${isRunning ? 'Running' : 'Stopped'}</span>
+                        </div>
+                        <span style="font-size:12px;color:var(--dim);">${nextRun}</span>
+                        ${lastRunRes ? `
+                        <span style="font-size:12px;color:var(--dim);">Last: <strong style="color:var(--text);">${lastRunRes.decisions} decisions</strong> · ${lastRunRes.users} users · ${lastRunRes.duration_s}s</span>` : ''}
+                        <div style="margin-left:auto;">
+                            <a href="analytics.html" style="font-size:12px;color:var(--accent);text-decoration:none;font-weight:600;padding:7px 14px;border-radius:8px;border:1px solid rgba(91,140,255,.3);background:rgba(91,140,255,.08);">
+                                Open Scheduler Control →
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+            </div>`;
+        };
+
+        // Shell calls loadNeuralOrbitAdminPage when module=neural-orbit admin
+        // Register it so shell.js loaderMap can find it
+        window.loadNeuralOrbitPage = window.loadNeuralOrbitAdminPage;
+
+        window.addEventListener('router-ready', () => window.loadNeuralOrbitAdminPage?.());
+    </script>
+</body>
+
+</html>

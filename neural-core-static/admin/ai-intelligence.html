@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuralOrbit — AI Intelligence Dashboard (Admin)</title>
+    <meta name="description" content="NeuralOrbit Admin AI Intelligence — cross-user accuracy, mistake patterns, and autonomy analytics" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/layout.css" />
+    <link rel="stylesheet" href="../css/components.css" />
+</head>
+<body data-module="ai-intelligence" data-role="admin">
+    <div id="app-shell" class="app-shell">
+        <aside id="sidebar" class="sidebar"></aside>
+        <div class="main-area" id="main-area">
+            <header id="topnav" class="topnav"></header>
+            <main id="page-content" class="page-content"><div class="page-loading"><div class="loading-spinner"></div></div></main>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="../js/config.js"></script>
+    <script src="../js/supabase-client.js"></script><script src="../js/auth.js"></script>
+<script src="../js/api.js"></script>
+    <script src="../js/guard.js"></script><script src="../js/shell.js"></script>
+    <script src="../js/router.js"></script><script src="../js/overview.js"></script>
+    <script src="../js/decision-log.js"></script><script src="../js/reward-engine.js"></script>
+    <script src="../js/autonomy.js"></script><script src="../js/learning.js"></script>
+    <script src="../js/sandbox.js"></script><script src="../js/modules.js"></script>
+    <script src="../js/app.js"></script>
+    <script>
+    /* ============================================================
+       Admin AI Intelligence Dashboard — ai-intelligence.html
+       Defines window.loadAIIntelligencePage only. ADDITIVE.
+       Calls: /admin/intelligence/summary | /mistakes | /accuracy
+       Falls back to demo data if backend offline.
+    ============================================================ */
+    (function(){
+        'use strict';
+        const BACKEND = window.BACKEND_URL || 'http://127.0.0.1:8000';
+
+        // ── Demo fallback data ────────────────────────────────────────────────
+        const DEMO_SUMMARY = {
+            total_users_tracked:     12,
+            avg_accuracy_pct:        73.4,
+            total_decisions:         486,
+            total_mistakes_recorded: 34,
+            top_module:              'shield',
+            worst_module:            'marketing',
+            auto_executed_today:     8,
+            module_accuracy:         { crm: 78.5, marketing: 61.2, shield: 88.3, website: 72.1 },
+        };
+        const DEMO_MISTAKES = { mistakes: [
+            { module:'crm',       trigger_type:'no_activity_5d',     bad_action:'Re-engage lead pipeline — no CRM activity detected in 5 days', times_rejected:7, last_seen_at: new Date().toISOString(), user_id:'user1234...' },
+            { module:'marketing', trigger_type:'high_cpl',           bad_action:'Reduce budget for healthcare vertical by 20%',                 times_rejected:5, last_seen_at: new Date().toISOString(), user_id:'user5678...' },
+            { module:'website',   trigger_type:'high_bounce_rate',   bad_action:'Landing page optimization needed — bounce rate at 68%',        times_rejected:4, last_seen_at: new Date().toISOString(), user_id:'user9abc...' },
+            { module:'shield',    trigger_type:'threat_cluster',     bad_action:'Block IP range 185.220.x.x — Tor exit node activity',          times_rejected:3, last_seen_at: new Date().toISOString(), user_id:'userde12...' },
+            { module:'crm',       trigger_type:'high_no_response',   bad_action:'Launch follow-up campaign — 3 leads unresponsive',              times_rejected:2, last_seen_at: new Date().toISOString(), user_id:'useref34...' },
+        ], total: 5 };
+        const DEMO_ACCURACY = { rows: [
+            { user_id:'user5678...', module:'marketing', accuracy_pct:61.2, total_decisions:28, correct_decisions:17, rejected_decisions:11, avg_confidence:0.74 },
+            { user_id:'user9abc...', module:'website',   accuracy_pct:72.1, total_decisions:42, correct_decisions:30, rejected_decisions:12, avg_confidence:0.78 },
+            { user_id:'user1234...', module:'crm',       accuracy_pct:78.5, total_decisions:56, correct_decisions:44, rejected_decisions:12, avg_confidence:0.81 },
+            { user_id:'userde12...', module:'shield',    accuracy_pct:88.3, total_decisions:35, correct_decisions:31, rejected_decisions:4,  avg_confidence:0.91 },
+        ], total: 4 };
+
+        async function api(path){
+            try{
+                const t=localStorage.getItem('neuralorbit_token');
+                const r=await fetch(BACKEND+path,{signal:AbortSignal.timeout(4000),headers:{'Content-Type':'application/json',...(t?{Authorization:`Bearer ${t}`}:{})}});
+                if(!r.ok)return null;return r.json();
+            }catch{return null;}
+        }
+
+        // ── Helpers ────────────────────────────────────────────────────────────
+        function modColor(m){ return {crm:'#22C55E',marketing:'#8B5CF6',shield:'#F59E0B',website:'#5B8CFF'}[m]||'#94a3b8'; }
+        function accColor(pct){ return pct>=80?'#22C55E':pct>=65?'#F59E0B':'#EF4444'; }
+        function kpiCard(icon,color,label,val,sub){
+            return `<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <div style="width:32px;height:32px;border-radius:8px;background:${color}1a;display:flex;align-items:center;justify-content:center;">
+                        <i class="bi ${icon}" style="color:${color};font-size:15px;"></i>
+                    </div>
+                    <span style="font-size:12px;color:var(--muted);font-weight:500;">${label}</span>
+                </div>
+                <div style="font-size:28px;font-weight:700;color:var(--text);">${val}</div>
+                ${sub?`<div style="font-size:11px;color:var(--muted);">${sub}</div>`:''}
+            </div>`;
+        }
+        function accBar(pct){
+            const col=accColor(pct);
+            return `<div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${col};border-radius:3px;transition:width 0.6s;"></div></div><span style="font-size:12px;color:${col};font-weight:600;min-width:38px;">${pct}%</span></div>`;
+        }
+        function modBadge(m){
+            return `<span style="font-size:10px;padding:2px 8px;border-radius:4px;background:${modColor(m)}1a;color:${modColor(m)};font-weight:600;text-transform:uppercase;">${m}</span>`;
+        }
+
+        // ── Main render ───────────────────────────────────────────────────────
+        function renderPage(summary, mistakes, accuracy, isDemo){
+            const content = document.getElementById('page-content');
+            if(!content) return;
+
+            const s = summary || DEMO_SUMMARY;
+            const mk = (mistakes?.mistakes || DEMO_MISTAKES.mistakes);
+            const ac = (accuracy?.rows || DEMO_ACCURACY.rows);
+
+            // Module accuracy bar data
+            const modAccBars = Object.entries(s.module_accuracy||{}).map(([mod,pct])=>
+                `<div style="margin-bottom:12px;">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                        ${modBadge(mod)}<span style="font-size:11px;color:var(--muted);">${pct}% avg</span>
+                    </div>
+                    ${accBar(pct)}
+                </div>`
+            ).join('');
+
+            // Mistakes table rows
+            const mistakeRows = mk.map(m=>
+                `<tr onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background='transparent'">
+                    <td style="padding:10px 16px;">${modBadge(m.module)}</td>
+                    <td style="padding:10px 16px;font-size:11px;color:var(--muted);font-family:monospace;">${escHtml(m.trigger_type)}</td>
+                    <td style="padding:10px 16px;font-size:12px;color:var(--text);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(m.bad_action)}</td>
+                    <td style="padding:10px 16px;text-align:center;">
+                        <span style="font-size:14px;font-weight:700;color:#EF4444;">${m.times_rejected}</span>
+                    </td>
+                    <td style="padding:10px 16px;font-size:11px;color:var(--muted);">${m.last_seen_at?.slice(0,10)||'—'}</td>
+                    <td style="padding:10px 16px;font-size:11px;color:var(--muted);font-family:monospace;">${escHtml(m.user_id)}</td>
+                </tr>`
+            ).join('');
+
+            // Accuracy table rows
+            const accRows = ac.map(r=>
+                `<tr onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background='transparent'">
+                    <td style="padding:10px 16px;font-size:11px;color:var(--muted);font-family:monospace;">${escHtml(r.user_id)}</td>
+                    <td style="padding:10px 16px;">${modBadge(r.module)}</td>
+                    <td style="padding:10px 16px;min-width:140px;">${accBar(r.accuracy_pct)}</td>
+                    <td style="padding:10px 16px;font-size:12px;color:var(--text);text-align:center;">${r.total_decisions}</td>
+                    <td style="padding:10px 16px;font-size:12px;color:#22C55E;text-align:center;">${r.correct_decisions}</td>
+                    <td style="padding:10px 16px;font-size:12px;color:#EF4444;text-align:center;">${r.rejected_decisions}</td>
+                    <td style="padding:10px 16px;font-size:12px;color:var(--muted);text-align:center;">${Math.round((r.avg_confidence||0)*100)}%</td>
+                </tr>`
+            ).join('');
+
+            content.innerHTML = `
+            <div style="padding:24px;display:flex;flex-direction:column;gap:24px;">
+
+                <!-- Header -->
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+                    <div>
+                        <h1 style="font-size:22px;font-weight:700;color:var(--text);margin:0;">
+                            AI Intelligence Dashboard
+                            <span style="font-size:14px;font-weight:500;color:var(--muted);"> — Admin View</span>
+                        </h1>
+                        <p style="font-size:13px;color:var(--muted);margin:4px 0 0;">Cross-user AI accuracy, mistake patterns, and autonomy analytics.</p>
+                    </div>
+                    ${isDemo?'<span style="font-size:11px;padding:4px 10px;border-radius:6px;background:rgba(245,158,11,.12);color:#F59E0B;font-weight:600;">BACKEND OFFLINE</span>':'<span style="font-size:11px;padding:4px 10px;border-radius:6px;background:rgba(34,197,94,.12);color:#22C55E;font-weight:600;">LIVE DATA</span>'}
+                </div>
+
+                <!-- KPI Cards -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;">
+                    ${kpiCard('bi-people-fill','#5B8CFF','Users Tracked',s.total_users_tracked,'')}
+                    ${kpiCard('bi-graph-up','#22C55E','Avg AI Accuracy',s.avg_accuracy_pct+'%','across all modules')}
+                    ${kpiCard('bi-journal-check','#8B5CF6','Total Decisions',s.total_decisions,'')}
+                    ${kpiCard('bi-x-circle-fill','#EF4444','Mistakes Recorded',s.total_mistakes_recorded,'rejections tracked')}
+                    ${kpiCard('bi-lightning-fill','#F59E0B','Auto-Executed Today',s.auto_executed_today,'autonomous actions')}
+                </div>
+
+                <!-- Row: Module Accuracy + Top/Worst -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+                    <!-- Module Accuracy Bars -->
+                    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;">
+                        <h3 style="font-size:14px;font-weight:600;color:var(--text);margin:0 0 16px;">Module Accuracy (Avg Across All Users)</h3>
+                        ${modAccBars || '<p style="color:var(--muted);font-size:13px;">No data yet.</p>'}
+                    </div>
+
+                    <!-- Best / Worst -->
+                    <div style="display:flex;flex-direction:column;gap:16px;">
+                        <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;flex:1;">
+                            <div style="font-size:12px;color:var(--muted);font-weight:500;margin-bottom:8px;">TOP PERFORMING MODULE</div>
+                            <div style="display:flex;align-items:center;gap:10px;">
+                                <i class="bi bi-trophy-fill" style="color:#F59E0B;font-size:24px;"></i>
+                                <div>
+                                    <div style="font-size:20px;font-weight:700;color:var(--text);text-transform:capitalize;">${escHtml(s.top_module)}</div>
+                                    <div style="font-size:12px;color:var(--muted);">Highest avg accuracy</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;flex:1;">
+                            <div style="font-size:12px;color:var(--muted);font-weight:500;margin-bottom:8px;">NEEDS IMPROVEMENT</div>
+                            <div style="display:flex;align-items:center;gap:10px;">
+                                <i class="bi bi-exclamation-triangle-fill" style="color:#EF4444;font-size:24px;"></i>
+                                <div>
+                                    <div style="font-size:20px;font-weight:700;color:var(--text);text-transform:capitalize;">${escHtml(s.worst_module)}</div>
+                                    <div style="font-size:12px;color:var(--muted);">Lowest avg accuracy — review patterns</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Top Mistake Patterns -->
+                <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+                    <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+                        <i class="bi bi-x-circle-fill" style="color:#EF4444;font-size:16px;"></i>
+                        <span style="font-size:14px;font-weight:600;color:var(--text);">Top Rejected AI Recommendations (All Users)</span>
+                        <span style="margin-left:auto;font-size:11px;color:var(--muted);">These are actions the AI keeps suggesting that users keep rejecting</span>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;">
+                            <thead><tr style="border-bottom:1px solid var(--border);">
+                                <th scope="col" style="padding:10px 16px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Module</th>
+                                <th scope="col" style="padding:10px 16px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Trigger</th>
+                                <th scope="col" style="padding:10px 16px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Bad Action</th>
+                                <th scope="col" style="padding:10px 16px;text-align:center;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Rejected</th>
+                                <th scope="col" style="padding:10px 16px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Last Seen</th>
+                                <th scope="col" style="padding:10px 16px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">User</th>
+                            </tr></thead>
+                            <tbody>${mistakeRows||'<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--muted);">No mistake patterns recorded yet. AI is performing well or needs more data.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Per-User Accuracy Breakdown -->
+                <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+                    <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+                        <i class="bi bi-people-fill" style="color:#5B8CFF;font-size:16px;"></i>
+                        <span style="font-size:14px;font-weight:600;color:var(--text);">Per-User Per-Module Accuracy Breakdown</span>
+                        <span style="margin-left:auto;font-size:11px;color:var(--muted);">Sorted worst first — identify users needing attention</span>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;">
+                            <thead><tr style="border-bottom:1px solid var(--border);">
+                                <th scope="col" style="padding:10px 16px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">User</th>
+                                <th scope="col" style="padding:10px 16px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Module</th>
+                                <th scope="col" style="padding:10px 16px;text-align:left;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;min-width:160px;">Accuracy</th>
+                                <th scope="col" style="padding:10px 16px;text-align:center;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Total</th>
+                                <th scope="col" style="padding:10px 16px;text-align:center;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Approved</th>
+                                <th scope="col" style="padding:10px 16px;text-align:center;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Rejected</th>
+                                <th scope="col" style="padding:10px 16px;text-align:center;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Avg Conf.</th>
+                            </tr></thead>
+                            <tbody>${accRows||'<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--muted);">No accuracy data yet. AI decisions need user feedback to build stats.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>`;
+        }
+
+        window.loadAIIntelligencePage = async function(){
+            const [summary, mistakes, accuracy] = await Promise.all([
+                api('/api/v1/admin/intelligence/summary'),
+                api('/api/v1/admin/intelligence/mistakes?limit=10'),
+                api('/api/v1/admin/intelligence/accuracy'),
+            ]);
+            const isDemo = !summary;
+            renderPage(summary, mistakes, accuracy, isDemo);
+        };
+
+    })();
+    </script>
+</body>
+</html>

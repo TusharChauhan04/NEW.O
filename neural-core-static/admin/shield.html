@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuralOrbit — Shield Module (Admin)</title>
+    <meta name="description" content="NeuralOrbit Admin Shield — cross-user security decisions and threat activity" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="../css/theme.css" /><link rel="stylesheet" href="../css/layout.css" /><link rel="stylesheet" href="../css/components.css" />
+</head>
+<body data-module="admin-shield" data-role="admin">
+    <div id="app-shell" class="app-shell">
+        <aside id="sidebar" class="sidebar"></aside>
+        <div class="main-area" id="main-area">
+            <header id="topnav" class="topnav"></header>
+            <main id="page-content" class="page-content"><div class="page-loading"><div class="loading-spinner"></div></div></main>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="../js/config.js"></script>
+    <script src="../js/supabase-client.js"></script><script src="../js/auth.js"></script>
+<script src="../js/api.js"></script>
+    <script src="../js/guard.js"></script><script src="../js/shell.js"></script>
+    <script src="../js/router.js"></script><script src="../js/overview.js"></script>
+    <script src="../js/decision-log.js"></script><script src="../js/reward-engine.js"></script>
+    <script src="../js/autonomy.js"></script><script src="../js/learning.js"></script>
+    <script src="../js/sandbox.js"></script><script src="../js/modules.js"></script>
+    <script src="../js/admin-module-page.js"></script>
+    <script src="../js/app.js"></script>
+    <script>
+    /* Admin Shield Page — config only; shared logic in js/admin-module-page.js */
+    window.loadShieldAdminPage = window.createAdminModulePage({
+        module: 'shield',
+        idPrefix: 'shield',
+        title: 'Shield Module',
+        subtitle: 'All-user security decisions, threat clusters, and AI response activity.',
+        confidenceColor: (p) => p >= 90 ? '#22C55E' : p >= 70 ? '#F59E0B' : '#EF4444',
+        kpiDefs: [
+            { key: 'threats_blocked', label: 'Threats Blocked', icon: 'bi-shield-check', color: '#F59E0B' },
+            { key: 'breach_count', label: 'Breaches Detected', icon: 'bi-exclamation-triangle-fill', color: '#EF4444' },
+            { key: 'risk_score', label: 'Risk Score', icon: 'bi-speedometer2', color: '#8B5CF6', suffix: '/100' },
+            { key: 'security_score', label: 'Security Health', icon: 'bi-heart-pulse', color: '#22C55E', suffix: '%' },
+        ],
+        demoDecisions: [
+            { id: 's1', module: 'shield', action: 'Escalate to security team — 5 threats blocked in 1 hour', outcome: 'applied', confidence: 0.95, observe_only: false, auto_executed: true, created_at: new Date().toISOString(), reasoning: '5 threat events clustered in 1hr suggest coordinated attack.' },
+            { id: 's2', module: 'shield', action: 'Immediate breach response required — security breach detected', outcome: 'pending', confidence: 0.99, observe_only: false, auto_executed: false, created_at: new Date(Date.now() - 3600000).toISOString(), reasoning: 'Breach event detected. Initiate incident response plan.' },
+            { id: 's3', module: 'shield', action: 'Monitor unusual login patterns from Eastern Europe', outcome: 'pending', confidence: 0.72, observe_only: true, auto_executed: false, created_at: new Date(Date.now() - 86400000).toISOString(), reasoning: 'Observe mode: unusual geo logins detected.' },
+            { id: 's4', module: 'shield', action: 'Block IP range 185.220.x.x — Tor exit node activity', outcome: 'rejected', confidence: 0.81, observe_only: false, auto_executed: false, created_at: new Date(Date.now() - 172800000).toISOString(), reasoning: 'Legitimate users may use this range.' },
+        ],
+    });
+    </script>
+</body>
+</html>

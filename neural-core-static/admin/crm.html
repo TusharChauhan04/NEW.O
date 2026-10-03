@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuralOrbit — CRM Module (Admin)</title>
+    <meta name="description" content="NeuralOrbit Admin CRM — cross-user pipeline decisions and AI activity" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/layout.css" />
+    <link rel="stylesheet" href="../css/components.css" />
+</head>
+
+<body data-module="admin-crm" data-role="admin">
+
+    <div id="app-shell" class="app-shell">
+        <aside id="sidebar" class="sidebar"></aside>
+        <div class="main-area" id="main-area">
+            <header id="topnav" class="topnav"></header>
+            <main id="page-content" class="page-content">
+                <div class="page-loading">
+                    <div class="loading-spinner"></div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="../js/config.js"></script>
+    <script src="../js/supabase-client.js"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/guard.js"></script>
+    <script src="../js/shell.js"></script>
+    <script src="../js/router.js"></script>
+    <script src="../js/overview.js"></script>
+    <script src="../js/decision-log.js"></script>
+    <script src="../js/reward-engine.js"></script>
+    <script src="../js/autonomy.js"></script>
+    <script src="../js/learning.js"></script>
+    <script src="../js/sandbox.js"></script>
+    <script src="../js/modules.js"></script>
+    <script src="../js/admin-module-page.js"></script>
+    <script src="../js/app.js"></script>
+
+    <script>
+    /* Admin CRM Page — config only; all rendering logic lives in
+       js/admin-module-page.js (shared by crm/marketing/shield/website). */
+    window.loadCrmAdminPage = window.createAdminModulePage({
+        module: 'crm',
+        idPrefix: 'crm',
+        title: 'CRM Module',
+        subtitle: 'All-user CRM decisions, pipeline AI activity, and autonomy status.',
+        kpiDefs: [
+            { key: 'active_leads',    label: 'Active Leads',    icon: 'bi-person-plus-fill', color: '#5B8CFF' },
+            { key: 'conversion_rate', label: 'Conversion Rate', icon: 'bi-graph-up-arrow',   color: '#22C55E', suffix: '%' },
+            { key: 'avg_deal_value',  label: 'Avg Deal Value',  icon: 'bi-currency-dollar',  color: '#F59E0B', prefix: '$' },
+            { key: 'pipeline_health', label: 'Pipeline Health', icon: 'bi-activity',         color: '#8B5CF6', suffix: '%' },
+        ],
+        demoDecisions: [
+            { id: 'd1', module: 'crm', action: 'Re-engage lead pipeline — no CRM activity detected in 5 days', outcome: 'pending',  confidence: 0.82, observe_only: false, auto_executed: false, created_at: new Date().toISOString(), reasoning: 'No CRM events in last 5 days. Pipeline stalling.' },
+            { id: 'd2', module: 'crm', action: 'Launch follow-up campaign — 5 leads unresponsive',             outcome: 'applied',  confidence: 0.88, observe_only: false, auto_executed: true,  created_at: new Date(Date.now() - 86400000).toISOString(), reasoning: '5 leads unresponsive for 7 days.' },
+            { id: 'd3', module: 'crm', action: 'Re-engage cold leads in healthcare segment',                   outcome: 'pending',  confidence: 0.71, observe_only: true,  auto_executed: false, created_at: new Date(Date.now() - 172800000).toISOString(), reasoning: 'Observe-only: AI suggests cold lead re-engagement.' },
+            { id: 'd4', module: 'crm', action: 'Close stalled deal with Acme Corp — offer 10% discount',       outcome: 'rejected', confidence: 0.65, observe_only: false, auto_executed: false, created_at: new Date(Date.now() - 259200000).toISOString(), reasoning: 'Deal has not progressed in 10 days.' },
+        ],
+    });
+    </script>
+
+</body>
+</html>

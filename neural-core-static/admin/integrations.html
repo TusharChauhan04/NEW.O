@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuralOrbit — Integration Health Monitor (Admin)</title>
+    <meta name="description" content="Admin view of all users' integration health, events, and webhook status" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/layout.css" />
+    <link rel="stylesheet" href="../css/components.css" />
+    <style>
+        .health-dot {
+            width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block;
+        }
+        .health-active       { background: #22C55E; box-shadow: 0 0 6px rgba(34,197,94,.6); animation: pulse 2s infinite; }
+        .health-idle         { background: #F59E0B; }
+        .health-error        { background: #EF4444; box-shadow: 0 0 6px rgba(239,68,68,.5); animation: pulse 1.5s infinite; }
+        .health-disconnected { background: #4B5563; }
+
+        .intg-row {
+            display: grid;
+            grid-template-columns: 2fr 100px 100px 80px 90px 80px 120px;
+            gap: 12px; align-items: center;
+            padding: 14px 20px;
+            border-bottom: 1px solid rgba(91,140,255,.04);
+            transition: background .12s;
+        }
+        .intg-row:hover { background: rgba(91,140,255,.04); }
+
+        .module-health-card {
+            padding: 16px 20px; border-radius: 12px;
+            border: 1px solid var(--border); background: rgba(17,24,39,.7);
+            display: flex; align-items: center; gap: 14px;
+        }
+        .search-filter-bar {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        }
+    </style>
+</head>
+
+<body data-module="integrations" data-role="admin">
+    <div id="app-shell" class="app-shell">
+        <aside id="sidebar" class="sidebar"></aside>
+        <div class="main-area" id="main-area">
+            <header id="topnav" class="topnav"></header>
+            <main id="page-content" class="page-content">
+                <div class="page-loading"><div class="loading-spinner"></div></div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="../js/config.js"></script>
+    <script src="../js/supabase-client.js"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/guard.js"></script>
+    <script src="../js/shell.js"></script>
+    <script src="../js/router.js"></script>
+    <script src="../js/app.js"></script>
+    <script>
+        /* ============================================================
+           admin/integrations.html — Integration Health Monitor
+           Backend: GET /api/v1/admin/integrations  (new — Phase D)
+                    GET /api/v1/admin/integrations/health (new — Phase D)
+           DOES NOT load integrations.js (user-only script).
+           All calls go through admin endpoints — user integrations.py untouched.
+        ============================================================ */
+        const BACKEND = window.BACKEND_URL || 'http://127.0.0.1:8000';
+        let _integrations = [];
+        let _filtered     = [];
+        let _activeModule = 'all';
+        let _activeHealth = 'all';
+        let _searchQuery  = '';
+        let _usingDemo    = false;
+
+        const MOD_META = {
+            crm:       { label: 'CRM',       color: '#5B8CFF', icon: 'bi-people' },
+            marketing: { label: 'Marketing',  color: '#8B5CF6', icon: 'bi-megaphone' },
+            shield:    { label: 'Shield',     color: '#F59E0B', icon: 'bi-shield-fill' },
+            website:   { label: 'Website',    color: '#22C55E', icon: 'bi-globe' },
+        };
+        const HEALTH_CFG = {
+            active:       { color: '#22C55E', label: 'Active',       dot: 'health-active' },
+            idle:         { color: '#F59E0B', label: 'Idle',         dot: 'health-idle' },
+            error:        { color: '#EF4444', label: 'Error',        dot: 'health-error' },
+            disconnected: { color: '#4B5563', label: 'Disconnected', dot: 'health-disconnected' },
+        };
+        const PLATFORM_ICONS = {
+            zoho: 'bi-cloud', hubspot: 'bi-funnel', meta_ads: 'bi-meta',
+            google_ads: 'bi-google', webhook: 'bi-link-45deg', custom: 'bi-plug',
+            oauth: 'bi-shield-lock', api_key: 'bi-key',
+        };
+
+        async function apiFetch(path) {
+            try {
+                const token = localStorage.getItem('neuralorbit_token');
+                const res = await fetch(BACKEND + path, {
+                    signal: AbortSignal.timeout(7000),
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                if (!res.ok) return null;
+                return await res.json();
+            } catch { return null; }
+        }
+
+        /* ── Page loader ───────────────────────────────────────── */
+        window.loadIntegrationsPage = async function () {
+            const content = document.getElementById('page-content');
+            if (!content) return;
+
+            // Skeleton
+            content.innerHTML = `<div style="padding:24px;display:flex;flex-direction:column;gap:16px;">
+                <div style="height:44px;width:300px;border-radius:10px;background:rgba(6,182,212,.08);animation:pulse 1.5s infinite;"></div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;">
+                    ${Array(4).fill('<div style="height:80px;border-radius:12px;background:rgba(6,182,212,.05);animation:pulse 1.5s infinite;"></div>').join('')}
+                </div>
+                ${Array(4).fill('<div style="height:60px;border-radius:10px;background:rgba(6,182,212,.03);animation:pulse 1.5s infinite;"></div>').join('')}
+            </div>`;
+
+            const data = await apiFetch('/api/v1/admin/integrations');
+
+            if (data && data.integrations && data.integrations.length) {
+                _usingDemo    = false;
+                _integrations = data.integrations;
+            } else {
+                _usingDemo    = true;
+                _integrations = getDemoIntegrations();
+            }
+
+            _filtered = [..._integrations];
+            renderPage(content, data?.health_summary);
+            bindEvents();
+        };
+
+        function getDemoIntegrations() {
+            const now = new Date().toISOString();
+            const old = new Date(Date.now() - 90000000).toISOString();
+            return [
+                { id: 'INT-001', user_id: 'USR-001xxxx', module: 'crm',       platform: 'zoho',       type: 'oauth',   label: 'Zoho CRM',          status: 'active', health: 'active',  event_count: 312, error_count: 0, last_sync_at: now },
+                { id: 'INT-002', user_id: 'USR-001xxxx', module: 'marketing', platform: 'meta_ads',   type: 'api_key', label: 'Meta Ads',           status: 'active', health: 'active',  event_count: 89,  error_count: 0, last_sync_at: now },
+                { id: 'INT-003', user_id: 'USR-002xxxx', module: 'crm',       platform: 'hubspot',    type: 'oauth',   label: 'HubSpot CRM',        status: 'active', health: 'idle',    event_count: 0,   error_count: 0, last_sync_at: old },
+                { id: 'INT-004', user_id: 'USR-002xxxx', module: 'marketing', platform: 'google_ads', type: 'webhook', label: 'Google Ads Webhook', status: 'active', health: 'error',   event_count: 44,  error_count: 44,last_sync_at: old },
+                { id: 'INT-005', user_id: 'USR-003xxxx', module: 'shield',    platform: 'custom',     type: 'webhook', label: 'Custom Shield Hook', status: 'active', health: 'active',  event_count: 7,   error_count: 0, last_sync_at: now },
+                { id: 'INT-006', user_id: 'USR-003xxxx', module: 'website',   platform: 'webhook',    type: 'webhook', label: 'Site Tracker',       status: 'active', health: 'idle',    event_count: 0,   error_count: 0, last_sync_at: null },
+            ];
+        }
+
+        /* ── Main render ─────────────────────────────────────── */
+        function renderPage(content, serverSummary) {
+            const summary = serverSummary || computeSummary(_integrations);
+            const modules = [...new Set(_integrations.map(i => i.module))].sort();
+
+            // Per-module breakdown
+            const byMod = {};
+            _integrations.forEach(i => {
+                const m = i.module || 'unknown';
+                const b = byMod[m] = byMod[m] || { active: 0, idle: 0, error: 0, total: 0, events: 0 };
+                b.total++;
+                b.events += i.event_count || 0;
+                if (i.health === 'active') b.active++;
+                else if (i.health === 'error') b.error++;
+                else b.idle++;
+            });
+
+            content.innerHTML = `
+            <div class="page-animate" style="padding:24px;display:flex;flex-direction:column;gap:24px;">
+
+                <!-- Header -->
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+                    <div>
+                        <h1 class="page-title">Integration Health Monitor</h1>
+                        <p class="page-subtitle">Visibility into every user's data connections, event flow, and webhook status</p>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        ${_usingDemo
+                            ? '<span style="font-size:11px;padding:4px 10px;border-radius:6px;background:rgba(245,158,11,.1);color:#F59E0B;border:1px solid rgba(245,158,11,.2);font-weight:600;">DEMO</span>'
+                            : '<span style="font-size:11px;padding:4px 10px;border-radius:6px;background:rgba(34,197,94,.1);color:#22C55E;border:1px solid rgba(34,197,94,.2);font-weight:600;">LIVE</span>'}
+                        <button id="intg-refresh-btn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:6px;">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Global stats -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+                    ${[
+                        { label: 'Total Integrations', value: summary.total        || 0, color: '#06B6D4', icon: 'bi-plug-fill' },
+                        { label: 'Active',             value: summary.active       || 0, color: '#22C55E', icon: 'bi-check-circle-fill' },
+                        { label: 'Idle / No Data',     value: summary.idle         || 0, color: '#F59E0B', icon: 'bi-hourglass-split' },
+                        { label: 'Error',              value: summary.error        || 0, color: '#EF4444', icon: 'bi-x-octagon-fill' },
+                        { label: 'Total Events',       value: summary.total_events || 0, color: '#8B5CF6', icon: 'bi-activity' },
+                    ].map(s => `
+                        <div class="card card-sm" style="display:flex;align-items:center;gap:12px;padding:16px;">
+                            <div style="width:38px;height:38px;border-radius:10px;background:${s.color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                <i class="bi ${s.icon}" style="font-size:16px;color:${s.color};"></i>
+                            </div>
+                            <div>
+                                <div style="font-size:22px;font-weight:700;color:var(--text);">${s.value.toLocaleString()}</div>
+                                <div style="font-size:10px;color:var(--dim);">${s.label}</div>
+                            </div>
+                        </div>`).join('')}
+                </div>
+
+                <!-- Per-module health cards -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+                    ${Object.entries(MOD_META).map(([key, meta]) => {
+                        const b = byMod[key] || { active: 0, idle: 0, error: 0, total: 0, events: 0 };
+                        const healthColor = b.error > 0 ? '#EF4444' : b.active > 0 ? '#22C55E' : '#F59E0B';
+                        return `
+                        <div class="module-health-card">
+                            <div style="width:40px;height:40px;border-radius:10px;background:${meta.color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                <i class="bi ${meta.icon}" style="font-size:18px;color:${meta.color};"></i>
+                            </div>
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-size:13px;font-weight:700;color:var(--text);">${meta.label}</div>
+                                <div style="font-size:11px;color:var(--dim);margin-top:2px;">${b.total} integration${b.total !== 1 ? 's' : ''} · ${b.events} events</div>
+                                <div style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+                                    ${b.active > 0  ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;color:#22C55E;background:rgba(34,197,94,.1);">${b.active} active</span>` : ''}
+                                    ${b.error > 0   ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;color:#EF4444;background:rgba(239,68,68,.1);">${b.error} error</span>` : ''}
+                                    ${b.idle > 0    ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;color:#F59E0B;background:rgba(245,158,11,.1);">${b.idle} idle</span>` : ''}
+                                    ${b.total === 0 ? `<span style="font-size:10px;color:var(--dim);">No integrations yet</span>` : ''}
+                                </div>
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+
+                <!-- Filters + search -->
+                <div class="search-filter-bar">
+                    <div style="flex:1;min-width:200px;display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:var(--radius);border:1px solid var(--border);background:rgba(30,41,59,.5);">
+                        <i class="bi bi-search" style="color:var(--dim);font-size:13px;"></i>
+                        <input id="intg-search" type="text" placeholder="Search label, user ID, platform…" aria-label="Search integrations by label, user ID, or platform" style="flex:1;background:transparent;border:none;outline:none;color:var(--text);font-size:13px;font-family:var(--font);" />
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        ${['all', ...modules].map((m, i) => {
+                            const meta = MOD_META[m];
+                            const label = meta ? meta.label : 'All Modules';
+                            const isAll = m === 'all';
+                            return `<button class="intg-filter-btn ${isAll ? 'is-active' : ''}" data-type="module" data-val="${m}"
+                                style="padding:8px 12px;border-radius:8px;border:1px solid ${isAll ? 'rgba(6,182,212,.4)' : 'var(--border)'};background:${isAll ? 'rgba(6,182,212,.12)' : 'transparent'};color:${isAll ? '#06B6D4' : 'var(--muted)'};font-size:11px;font-weight:600;cursor:pointer;font-family:var(--font);">${label}</button>`;
+                        }).join('')}
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                        ${['all', 'active', 'idle', 'error', 'disconnected'].map(h => {
+                            const cfg = HEALTH_CFG[h];
+                            const isAll = h === 'all';
+                            return `<button class="intg-filter-btn ${isAll ? 'is-active' : ''}" data-type="health" data-val="${h}"
+                                style="padding:8px 12px;border-radius:8px;border:1px solid ${isAll ? 'rgba(6,182,212,.4)' : 'var(--border)'};background:${isAll ? 'rgba(6,182,212,.12)' : 'transparent'};color:${isAll ? '#06B6D4' : 'var(--muted)'};font-size:11px;font-weight:600;cursor:pointer;font-family:var(--font);text-transform:capitalize;">${isAll ? 'All Health' : cfg.label}</button>`;
+                        }).join('')}
+                    </div>
+                </div>
+
+                <!-- Integrations table -->
+                <div class="card" style="padding:0;overflow:hidden;">
+                    <div class="intg-row" style="border-bottom:1px solid var(--border-light);background:rgba(17,24,39,.9);padding-top:10px;padding-bottom:10px;">
+                        ${['INTEGRATION','MODULE','PLATFORM','HEALTH','EVENTS','ERRORS','LAST SYNC'].map(h =>
+                            `<span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;">${h}</span>`
+                        ).join('')}
+                    </div>
+                    <div id="intg-rows">${buildRows(_integrations)}</div>
+                </div>
+
+            </div>`;
+        }
+
+        function buildRows(list) {
+            if (!list.length) return `
+                <div style="padding:48px;text-align:center;color:var(--dim);">
+                    <i class="bi bi-plug" style="font-size:36px;display:block;margin-bottom:12px;opacity:.4;"></i>
+                    <div>No integrations match the current filters</div>
+                </div>`;
+
+            return list.map(i => {
+                const mc    = MOD_META[i.module]?.color || '#94A3B8';
+                const hcfg  = HEALTH_CFG[i.health || 'idle'];
+                const platIcon = PLATFORM_ICONS[i.platform] || 'bi-plug';
+                const lastSync = i.last_sync_at
+                    ? formatRelative(i.last_sync_at)
+                    : 'Never';
+                const hasError = (i.error_count || 0) > 0;
+
+                return `
+                <div class="intg-row">
+                    <!-- Integration label + user -->
+                    <div style="min-width:0;">
+                        <div style="font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(i.label || i.platform)}</div>
+                        <div style="font-size:10px;color:var(--dim);font-family:monospace;margin-top:2px;">User: ${(i.user_id || '').substring(0, 8)}…</div>
+                    </div>
+                    <!-- Module badge -->
+                    <div>
+                        <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:5px;color:${mc};background:${mc}18;text-transform:capitalize;">
+                            ${MOD_META[i.module]?.label || i.module || '—'}
+                        </span>
+                    </div>
+                    <!-- Platform -->
+                    <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);">
+                        <i class="bi ${platIcon}" style="font-size:13px;opacity:.7;"></i>
+                        <span style="text-transform:capitalize;">${escHtml((i.platform || '').replace('_', ' '))}</span>
+                    </div>
+                    <!-- Health -->
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <span class="health-dot ${hcfg.dot}"></span>
+                        <span style="font-size:11px;font-weight:700;color:${hcfg.color};">${hcfg.label}</span>
+                    </div>
+                    <!-- Event count -->
+                    <div style="font-size:13px;font-weight:700;color:var(--text);font-family:monospace;">${(i.event_count || 0).toLocaleString()}</div>
+                    <!-- Error count -->
+                    <div style="font-size:13px;font-weight:700;${hasError ? 'color:#EF4444;' : 'color:var(--dim);'}font-family:monospace;">
+                        ${hasError ? `<span style="display:flex;align-items:center;gap:4px;"><i class="bi bi-exclamation-triangle" style="font-size:11px;"></i>${i.error_count}</span>` : '0'}
+                    </div>
+                    <!-- Last sync -->
+                    <div style="font-size:11px;color:var(--dim);">${lastSync}</div>
+                </div>`;
+            }).join('');
+        }
+
+        /* ── Helpers ─────────────────────────────────────────── */
+        function computeSummary(list) {
+            return {
+                total:        list.length,
+                active:       list.filter(i => i.health === 'active').length,
+                idle:         list.filter(i => i.health === 'idle').length,
+                error:        list.filter(i => i.health === 'error').length,
+                disconnected: list.filter(i => i.health === 'disconnected').length,
+                total_events: list.reduce((s, i) => s + (i.event_count || 0), 0),
+            };
+        }
+
+        function formatRelative(iso) {
+            try {
+                const diff = (Date.now() - new Date(iso)) / 1000;
+                if (diff < 60)    return `${Math.round(diff)}s ago`;
+                if (diff < 3600)  return `${Math.round(diff / 60)}m ago`;
+                if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
+                return `${Math.round(diff / 86400)}d ago`;
+            } catch { return '—'; }
+        }
+
+        /* ── Event binding ───────────────────────────────────── */
+        function bindEvents() {
+            document.getElementById('intg-refresh-btn')?.addEventListener('click', () => window.loadIntegrationsPage());
+
+            document.getElementById('intg-search')?.addEventListener('input', e => {
+                _searchQuery = e.target.value.toLowerCase().trim();
+                applyFilters();
+            });
+
+            document.addEventListener('click', e => {
+                const btn = e.target.closest('.intg-filter-btn');
+                if (!btn) return;
+                const type = btn.dataset.type;
+                const val  = btn.dataset.val;
+                if (type === 'module') _activeModule = val;
+                if (type === 'health') _activeHealth = val;
+
+                document.querySelectorAll(`.intg-filter-btn[data-type="${type}"]`).forEach(b => {
+                    const on = b.dataset.val === val;
+                    b.style.background = on ? 'rgba(6,182,212,.12)' : 'transparent';
+                    b.style.color      = on ? '#06B6D4' : 'var(--muted)';
+                    b.style.borderColor= on ? 'rgba(6,182,212,.4)' : 'var(--border)';
+                    b.classList.toggle('is-active', on);
+                });
+                applyFilters();
+            });
+        }
+
+        function applyFilters() {
+            _filtered = _integrations.filter(i => {
+                const modOK  = _activeModule === 'all' || i.module  === _activeModule;
+                const hlthOK = _activeHealth === 'all' || i.health  === _activeHealth;
+                const srchOK = !_searchQuery
+                    || (i.label    || '').toLowerCase().includes(_searchQuery)
+                    || (i.user_id  || '').toLowerCase().includes(_searchQuery)
+                    || (i.platform || '').toLowerCase().includes(_searchQuery)
+                    || (i.module   || '').toLowerCase().includes(_searchQuery);
+                return modOK && hlthOK && srchOK;
+            });
+            const wrap = document.getElementById('intg-rows');
+            if (wrap) wrap.innerHTML = buildRows(_filtered);
+        }
+
+        window.addEventListener('router-ready', () => window.loadIntegrationsPage?.());
+    </script>
+</body>
+
+</html>

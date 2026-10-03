@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuralOrbit — Business Portfolio (Admin)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/layout.css" />
+    <link rel="stylesheet" href="../css/components.css" />
+</head>
+
+<body data-module="portfolio" data-role="admin">
+
+    <div id="app-shell" class="app-shell">
+        <aside id="sidebar" class="sidebar"></aside>
+        <div class="main-area" id="main-area">
+            <header id="topnav" class="topnav"></header>
+            <main id="page-content" class="page-content">
+                <div class="page-loading">
+                    <div class="loading-spinner"></div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="../js/config.js"></script>
+    <script src="../js/supabase-client.js"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/guard.js"></script>
+    <script src="../js/shell.js"></script>
+    <script src="../js/router.js"></script>
+    <script src="../js/overview.js"></script>
+    <script src="../js/decision-log.js"></script>
+    <script src="../js/reward-engine.js"></script>
+    <script src="../js/autonomy.js"></script>
+    <script src="../js/learning.js"></script>
+    <script src="../js/app.js"></script>
+    <script>
+        /* ============================================================
+           admin/portfolio.html - Business Portfolio & Per-User AI Deep Dive
+           LIVE DATA: fetches from GET /api/v1/profile/all
+           Falls back to empty state (not fake data) if backend offline.
+        ============================================================ */
+        (function () {
+            'use strict';
+
+            var BACKEND = window.BACKEND_URL || 'http://127.0.0.1:8000';
+            var PLAN_COLORS = { starter: '#94A3B8', growth: '#5B8CFF', enterprise: '#22C55E', pro: '#8B5CF6' };
+            var PLAN_ICONS  = { starter: 'bi-person', growth: 'bi-graph-up', enterprise: 'bi-building', pro: 'bi-gem' };
+            var MOD_COLORS  = { crm: '#5B8CFF', marketing: '#8B5CF6', shield: '#F59E0B', website: '#22C55E' };
+            var healthConfig = {
+                enterprise: { color: '#22C55E', bg: 'rgba(34,197,94,0.12)',   label: 'Enterprise' },
+                pro:        { color: '#8B5CF6', bg: 'rgba(139,92,246,0.12)', label: 'Pro' },
+                growth:     { color: '#5B8CFF', bg: 'rgba(91,140,255,0.12)', label: 'Growth' },
+                starter:    { color: '#94A3B8', bg: 'rgba(148,163,184,0.1)', label: 'Starter' },
+            };
+
+            var liveProfiles = [];
+
+            async function fetchProfiles() {
+                try {
+                    var t = localStorage.getItem('neuralorbit_token');
+                    var headers = { 'Content-Type': 'application/json' };
+                    if (t) headers['Authorization'] = 'Bearer ' + t;
+                    var r = await fetch(BACKEND + '/api/v1/profile/all', {
+                        signal: AbortSignal.timeout(5000),
+                        headers: headers
+                    });
+                    if (!r.ok) return null;
+                    var d = await r.json();
+                    return d.profiles || null;
+                } catch (e) { return null; }
+            }
+
+            async function fetchAutonomy(userId) {
+                try {
+                    var t = localStorage.getItem('neuralorbit_token');
+                    var headers = { 'Content-Type': 'application/json' };
+                    if (t) headers['Authorization'] = 'Bearer ' + t;
+                    var r = await fetch(BACKEND + '/api/v1/states/autonomy?target_user_id=' + encodeURIComponent(userId), {
+                        signal: AbortSignal.timeout(4000),
+                        headers: headers
+                    });
+                    if (!r.ok) return null;
+                    var d = await r.json();
+                    return d.autonomy || null;
+                } catch (e) { return null; }
+            }
+
+            function profileToCard(p, index) {
+                var plan = (p.plan || 'starter').toLowerCase();
+                var hc = healthConfig[plan] || healthConfig.starter;
+                var pc = PLAN_COLORS[plan] || '#94A3B8';
+                var pi = PLAN_ICONS[plan] || 'bi-person';
+                var name = p.full_name || p.email || 'Unknown User';
+                var company = p.company || 'No company set';
+                return {
+                    index: index,
+                    id: p.id,
+                    name: name,
+                    company: company,
+                    plan: plan,
+                    role: p.role || 'user',
+                    email: p.email || '',
+                    color: pc,
+                    icon: pi,
+                    health: plan,
+                    hc: hc,
+                    created: p.created_at ? p.created_at.slice(0, 10) : 'Unknown',
+                };
+            }
+
+            function renderCard(c) {
+                return '<div style="padding:22px;border-radius:16px;border:1px solid var(--border);background:var(--card-bg);display:flex;flex-direction:column;gap:14px;cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s;" ' +
+                    'onmouseover="this.style.borderColor=\'' + c.color + '40\';this.style.boxShadow=\'0 0 24px ' + c.color + '14\';" ' +
+                    'onmouseout="this.style.borderColor=\'\';this.style.boxShadow=\'\';" ' +
+                    'onclick="NP_selectUser(' + c.index + ')" ' +
+                    // Keyboard access: a div with only onclick is unreachable by
+                    // keyboard. role+tabindex make it focusable and announced as a
+                    // button; Enter/Space then activate it like a real one.
+                    'role="button" tabindex="0" ' +
+                    'aria-label="AI deep dive for ' + escHtml(c.name) + '" ' +
+                    'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();NP_selectUser(' + c.index + ');}">' +
+                    '<div style="display:flex;align-items:flex-start;justify-content:space-between;">' +
+                        '<div style="display:flex;align-items:center;gap:12px;">' +
+                            '<div style="width:44px;height:44px;border-radius:12px;background:' + c.color + '18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">' +
+                                '<i class="bi ' + c.icon + '" style="font-size:20px;color:' + c.color + ';"></i>' +
+                            '</div>' +
+                            '<div>' +
+                                '<div style="font-size:14px;font-weight:700;color:var(--text);">' + escHtml(c.name) + '</div>' +
+                                '<div style="font-size:11px;color:var(--dim);margin-top:2px;">' + escHtml(c.email) + '</div>' +
+                                '<div style="font-size:11px;color:var(--dim);">' + escHtml(c.company) + '</div>' +
+                            '</div>' +
+                        '</div>' +
+                        '<span style="font-size:10px;font-weight:700;padding:4px 10px;border-radius:5px;color:' + c.hc.color + ';background:' + c.hc.bg + ';">' + c.hc.label + '</span>' +
+                    '</div>' +
+                    '<div style="display:flex;align-items:center;gap:8px;">' +
+                        '<div style="flex:1;height:6px;border-radius:99px;background:var(--surface);overflow:hidden;">' +
+                            '<div style="height:100%;width:' + (c.plan === 'enterprise' ? 100 : c.plan === 'pro' ? 75 : c.plan === 'growth' ? 50 : 25) + '%;background:linear-gradient(90deg,' + c.color + ',' + c.color + 'bb);border-radius:99px;"></div>' +
+                        '</div>' +
+                        '<span style="font-size:12px;font-weight:700;color:' + c.color + ';font-family:monospace;flex-shrink:0;">' + c.plan.toUpperCase() + '</span>' +
+                    '</div>' +
+                    '<div style="font-size:11px;color:var(--muted);padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(17,24,39,.5);">' +
+                        '<i class="bi bi-calendar3" style="color:var(--accent);margin-right:4px;"></i>Joined ' + c.created + '' +
+                        (c.role === 'admin' ? ' &nbsp;<span style="font-size:10px;color:#EF4444;font-weight:700;background:rgba(239,68,68,.1);padding:1px 6px;border-radius:4px;">ADMIN</span>' : '') +
+                    '</div>' +
+                '</div>';
+            }
+
+            function renderEmpty(isOffline) {
+                return '<div style="grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:60px 24px;border-radius:16px;border:1px dashed var(--border);">' +
+                    '<i class="bi bi-people" style="font-size:40px;color:var(--dim);"></i>' +
+                    '<div style="font-size:15px;font-weight:600;color:var(--muted);">' + (isOffline ? 'Backend offline - start uvicorn to see real users' : 'No users found in the database') + '</div>' +
+                    '<div style="font-size:12px;color:var(--dim);">' + (isOffline ? 'Run: python -m uvicorn app.main:app --reload' : 'Users will appear here once they sign up') + '</div>' +
+                '</div>';
+            }
+
+            window.NP_selectUser = async function(index) {
+                var p = liveProfiles[index];
+                if (!p) return;
+                var sel = document.getElementById('user-select');
+                if (sel) sel.value = index;
+
+                var panel = document.getElementById('deep-dive-panel');
+                var titleEl = document.getElementById('deep-dive-title');
+                var statsEl = document.getElementById('deep-dive-stats');
+                if (!panel) return;
+
+                panel.style.display = 'flex';
+                if (titleEl) titleEl.textContent = (p.full_name || p.email || 'User') + ' - ' + (p.company || p.plan || '');
+                if (statsEl) statsEl.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:10px;">Loading autonomy data...</div>';
+
+                var auto = await fetchAutonomy(p.id);
+                if (!statsEl) return;
+
+                var planColor = PLAN_COLORS[p.plan] || '#94A3B8';
+                function stat(label, value, color) {
+                    return '<div style="padding:14px 16px;border-radius:12px;border:1px solid ' + color + '18;background:' + color + '06;">' +
+                        '<div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">' + label + '</div>' +
+                        '<div style="font-size:20px;font-weight:700;color:' + color + ';font-family:monospace;">' + value + '</div>' +
+                    '</div>';
+                }
+
+                var lvl = auto ? (auto.global_level || 'assist') : 'N/A';
+                var lvlColor = { observe: '#94A3B8', assist: '#5B8CFF', autonomous: '#22C55E' }[lvl] || '#94A3B8';
+                statsEl.innerHTML =
+                    stat('Plan', (p.plan || 'starter').toUpperCase(), planColor) +
+                    stat('Role', (p.role || 'user').toUpperCase(), p.role === 'admin' ? '#EF4444' : '#5B8CFF') +
+                    stat('Autonomy', lvl.charAt(0).toUpperCase() + lvl.slice(1), lvlColor) +
+                    stat('Joined', (p.created_at || '').slice(0, 10) || 'Unknown', '#8B5CF6');
+
+                if (auto) {
+                    var moduleRows = ['crm','marketing','shield','website'].map(function(m) {
+                        var lv = auto[m] || 'assist';
+                        var mc = MOD_COLORS[m] || '#94A3B8';
+                        var lvColor = { observe: '#94A3B8', assist: '#5B8CFF', autonomous: '#22C55E' }[lv] || '#94A3B8';
+                        return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-light);">' +
+                            '<span style="font-size:12px;font-weight:600;color:' + mc + ';">' + m.charAt(0).toUpperCase() + m.slice(1) + '</span>' +
+                            '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;color:' + lvColor + ';background:' + lvColor + '18;">' + lv + '</span>' +
+                        '</div>';
+                    }).join('');
+                    statsEl.innerHTML += '<div style="grid-column:1/-1;padding:14px 16px;border-radius:12px;border:1px solid var(--border);background:var(--surface);margin-top:4px;">' +
+                        '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px;">Per-Module Autonomy</div>' +
+                        moduleRows +
+                    '</div>';
+                }
+                panel.scrollIntoView({ behavior: 'smooth' });
+            };
+
+            window.loadPortfolioPage = async function () {
+                var content = document.getElementById('page-content');
+                if (!content) return;
+
+                // Skeleton while loading
+                content.innerHTML = '<div style="padding:24px;display:flex;flex-direction:column;gap:20px;">' +
+                    '<div style="height:36px;width:240px;border-radius:10px;background:rgba(91,140,255,.08);animation:pulse 1.5s infinite;"></div>' +
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:18px;">' +
+                    Array(4).fill('<div style="height:180px;border-radius:16px;background:rgba(91,140,255,.05);animation:pulse 1.5s infinite;"></div>').join('') +
+                    '</div></div>';
+
+                var profiles = await fetchProfiles();
+                var isOffline = !profiles;
+                liveProfiles = profiles || [];
+
+                var cards = liveProfiles.map(function(p, i) { return profileToCard(p, i); });
+                var gridHtml = cards.length > 0
+                    ? cards.map(function(c) { return renderCard(c); }).join('')
+                    : renderEmpty(isOffline);
+
+                var badge = isOffline
+                    ? '<span style="font-size:10px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(245,158,11,.12);color:#F59E0B;margin-left:auto;">BACKEND OFFLINE</span>'
+                    : (liveProfiles.length === 0
+                        ? '<span style="font-size:10px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(148,163,184,.1);color:#94A3B8;margin-left:auto;">NO USERS YET</span>'
+                        : '<span style="font-size:10px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(34,197,94,.12);color:#22C55E;margin-left:auto;">LIVE DATA</span>');
+
+                var selectOptions = cards.map(function(c) {
+                    return '<option value="' + c.index + '">' + escHtml(c.name) + ' - ' + escHtml(c.company) + '</option>';
+                }).join('');
+
+                content.innerHTML = '<div class="page-animate" style="padding:24px;display:flex;flex-direction:column;gap:24px;">' +
+                    '<div style="display:flex;align-items:center;justify-content:space-between;">' +
+                        '<div>' +
+                            '<h1 class="page-title">Business Portfolio</h1>' +
+                            '<p class="page-subtitle">All registered users and their NeuralOrbit account status</p>' +
+                        '</div>' +
+                        '<div style="display:flex;align-items:center;gap:8px;">' +
+                            badge +
+                            '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:var(--radius);border:1px solid var(--border);background:rgba(30,41,59,.5);">' +
+                                '<i class="bi bi-person-bounding-box" style="font-size:14px;color:var(--accent);"></i>' +
+                                '<select id="user-select" style="background:transparent;border:none;outline:none;font-size:13px;font-weight:500;color:var(--text);font-family:var(--font);cursor:pointer;padding-right:8px;">' +
+                                    '<option value="">Select user for AI Deep Dive...</option>' +
+                                    selectOptions +
+                                '</select>' +
+                            '</div>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:18px;" id="business-grid">' +
+                        gridHtml +
+                    '</div>' +
+                    '<div id="deep-dive-panel" style="display:none;flex-direction:column;gap:0;border-radius:16px;border:1px solid rgba(91,140,255,.2);background:rgba(91,140,255,.03);overflow:hidden;">' +
+                        '<div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:rgba(91,140,255,.05);">' +
+                            '<div style="display:flex;align-items:center;gap:10px;">' +
+                                '<i class="bi bi-person-bounding-box" style="font-size:18px;color:var(--accent);"></i>' +
+                                '<div>' +
+                                    '<div style="font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.05em;">AI Deep Dive</div>' +
+                                    '<div id="deep-dive-title" style="font-size:14px;font-weight:600;color:var(--text);margin-top:2px;">-</div>' +
+                                '</div>' +
+                            '</div>' +
+                            '<button onclick="document.getElementById(\'deep-dive-panel\').style.display=\'none\';document.getElementById(\'user-select\').value=\'\';" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;">' +
+                                '<i class="bi bi-x-lg" style="font-size:13px;"></i>' +
+                            '</button>' +
+                        '</div>' +
+                        '<div style="padding:22px;">' +
+                            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;" id="deep-dive-stats"></div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>';
+
+                document.getElementById('user-select')?.addEventListener('change', function() {
+                    var idx = this.value;
+                    if (idx === '') { var p = document.getElementById('deep-dive-panel'); if(p) p.style.display='none'; return; }
+                    window.NP_selectUser(parseInt(idx));
+                });
+            };
+
+            window.addEventListener('router-ready', function() {
+                window.loadPortfolioPage && window.loadPortfolioPage();
+            });
+        })();
+    </script>
+</body>
+</html>

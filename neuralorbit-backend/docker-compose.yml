@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  # ── FastAPI Backend (DEV) ───────────────────────────────────
+  # This file is for local development — it mounts live source and runs
+  # uvicorn with --reload. The Dockerfile's own default CMD (gunicorn,
+  # no --reload) is what a real deployment uses; see docker-compose.prod.yml.
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - .:/app              # Live reload in dev — remove this in production
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # ── Redis (ready for Phase 2 Celery tasks) ─────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped

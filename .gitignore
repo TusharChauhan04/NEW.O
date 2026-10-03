@@ -1,0 +1,42 @@
+# Secrets & Environment Variables
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.egg-info/
+.Python
+build/
+dist/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Testing & Linting
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Local database & logs
+*.log
+logs/
+.megamemory/
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

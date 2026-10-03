@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuralOrbit — System Analytics (Admin)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/layout.css" />
+    <link rel="stylesheet" href="../css/components.css" />
+</head>
+
+<body data-module="analytics" data-role="admin">
+    <div id="app-shell" class="app-shell">
+        <aside id="sidebar" class="sidebar"></aside>
+        <div class="main-area" id="main-area">
+            <header id="topnav" class="topnav"></header>
+            <main id="page-content" class="page-content">
+                <div class="page-loading">
+                    <div class="loading-spinner"></div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="../js/config.js"></script>
+    <script src="../js/supabase-client.js"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/guard.js"></script>
+    <script src="../js/shell.js"></script>
+    <script src="../js/router.js"></script>
+    <script src="../js/app.js"></script>    <script>
+        const BACKEND = window.BACKEND_URL || 'http://127.0.0.1:8000';
+
+        async function apiFetch(path) {
+            try {
+                const token = localStorage.getItem('neuralorbit_token');
+                const res = await fetch(BACKEND + path, {
+                    signal: AbortSignal.timeout(5000),
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                if (!res.ok) return null;
+                return await res.json();
+            } catch { return null; }
+        }
+
+        window.loadAnalyticsPage = async function () {
+            const content = document.getElementById('page-content');
+            if (!content) return;
+
+            // Show skeleton
+            content.innerHTML = `<div style="padding:24px;display:flex;flex-direction:column;gap:16px;">
+                ${Array(4).fill('<div style="height:80px;border-radius:14px;background:rgba(91,140,255,.05);animation:pulse 1.5s infinite;"></div>').join('')}
+            </div>`;
+
+            // Fetch all 5 module overviews in parallel from backend
+            const modules = ['neural-orbit', 'crm', 'marketing', 'shield', 'website'];
+            const moduleColors = { 'neural-orbit': '#5B8CFF', crm: '#5B8CFF', marketing: '#8B5CF6', shield: '#F59E0B', website: '#22C55E' };
+            const moduleIcons  = { 'neural-orbit': 'bi-cpu', crm: 'bi-people', marketing: 'bi-megaphone', shield: 'bi-shield-fill', website: 'bi-globe' };
+            const moduleLabels = { 'neural-orbit': 'NeuralOrbit', crm: 'CRM', marketing: 'Marketing', shield: 'Shield', website: 'Website' };
+
+            const results = await Promise.all(modules.slice(1).map(m => apiFetch(`/api/v1/analytics/overview?module=${m}`)));
+
+            // Build cross-module analytics from real data
+            const crossData = modules.slice(1).map((m, i) => {
+                const d = results[i];
+                const decisions = d?.kpis?.find(k => k.title === 'AI Decisions Made')?.value || '—';
+                const confidence = d?.kpis?.find(k => k.title === 'Avg AI Confidence')?.value || '—';
+                return { module: moduleLabels[m], decisions, avgScore: confidence, trend: '+—', color: moduleColors[m], icon: moduleIcons[m], hasData: d?.has_data };
+            });
+
+            // Fetch backend health for system monitor
+            const health = await apiFetch('/health');
+            const healthOK = health?.status === 'ok';
+
+            const statusCfg = {
+                excellent: { color: '#8B5CF6', bg: 'rgba(139,92,246,0.12)', label: 'Up-to-date' },
+                healthy:   { color: '#22C55E', bg: 'rgba(34,197,94,0.12)',   label: 'Up-to-date' },
+                retraining:{ color: '#F59E0B', bg: 'rgba(245,158,11,0.12)',  label: 'Needs Retraining' },
+            };
+
+            const models = [
+                { name: 'CRM Lead Scoring',         module: 'CRM',       accuracy: 94, prevAcc: 89, lastTrained: 'Feb 15, 2026', dataSize: '124K records', status: 'healthy',   color: '#5B8CFF' },
+                { name: 'Marketing Attribution',     module: 'Marketing', accuracy: 91, prevAcc: 87, lastTrained: 'Feb 12, 2026', dataSize: '84K records',  status: 'healthy',   color: '#8B5CF6' },
+                { name: 'Threat Detection v3.2',     module: 'Shield',    accuracy: 98, prevAcc: 96, lastTrained: 'Feb 10, 2026', dataSize: '2.1M signals', status: 'excellent', color: '#F59E0B' },
+                { name: 'Website Personalization',   module: 'Website',   accuracy: 88, prevAcc: 80, lastTrained: 'Feb 5, 2026',  dataSize: '340K sessions',status: 'retraining',color: '#22C55E' },
+            ];
+
+            content.innerHTML = `
+            <div class="page-animate" style="padding: 24px; display: flex; flex-direction: column; gap: 24px;">
+                <div><h1 class="page-title">System Analytics</h1><p class="page-subtitle">Cross-module performance, system health ${healthOK ? '<span style="color:#22C55E;font-size:12px;"><i class="bi bi-circle-fill" style="font-size:7px;"></i> Backend Live</span>' : ''}</p></div>
+
+                <!-- System Health -->
+                <div class="card">
+                    <div class="card-title"><i class="bi bi-heartbeat" style="color: var(--success);"></i> System Health Monitor</div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px;">
+                        ${[
+                            { label: 'Backend Status',    value: healthOK ? 'Online' : 'Offline', sub: `v${health?.version || '—'} · ${health?.env || '—'}`, color: healthOK ? '#22C55E' : '#EF4444', icon: 'bi-rocket' },
+                            { label: 'Auth Mode',         value: health?.auth_required ? 'JWT On' : 'Dev Mode', sub: 'AUTH_REQUIRED setting', color: '#5B8CFF', icon: 'bi-shield-lock' },
+                            { label: 'AI Provider',       value: health?.llm_provider?.toUpperCase() || '—', sub: health?.llm_provider === 'mock' ? 'Add OPENAI_API_KEY to go live' : 'Real AI active', color: health?.llm_provider === 'openai' ? '#22C55E' : '#F59E0B', icon: 'bi-robot' },
+                            { label: 'CORS',              value: healthOK ? 'Unrestricted' : '—', sub: 'Dev mode: all origins allowed', color: '#8B5CF6', icon: 'bi-globe' },
+                        ].map(s => `
+                            <div style="padding: 18px; border-radius: 12px; border: 1px solid ${s.color}20; background: ${s.color}06;">
+                                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
+                                    <i class="bi ${s.icon}" style="color:${s.color};"></i>
+                                    <span style="font-size: 10px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em;">${s.label}</span>
+                                    <div style="width: 6px; height: 6px; border-radius: 50%; background: ${s.color}; margin-left: auto;"></div>
+                                </div>
+                                <div style="font-size: 22px; font-weight: 700; color: ${s.color}; font-family: monospace;">${s.value}</div>
+                                <div style="font-size: 11px; color: var(--dim); margin-top: 4px;">${s.sub}</div>
+                            </div>`).join('')}
+                    </div>
+                </div>
+
+                <!-- Cross-Module Analytics (live) -->
+                <div class="card">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                        <div class="card-title" style="margin:0;"><i class="bi bi-diagram-3" style="color: var(--accent);"></i> Cross-Module AI Analytics${crossData.some(c=>c.hasData) ? ' <span style="font-size:11px;color:#22C55E;font-weight:600;">(Live)</span>' : ' <span style="font-size:11px;color:var(--dim);">(No events yet)</span>'}</div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px;">
+                        ${crossData.map(a => `
+                            <div style="padding: 18px; border-radius: 12px; border: 1px solid ${a.color}20; background: ${a.color}06; display: flex; flex-direction: column; gap: 12px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between;">
+                                    <div style="display: flex; align-items: center; gap: 6px;"><i class="bi ${a.icon}" style="color: ${a.color};"></i><span style="font-size: 12px; font-weight: 700; color: ${a.color};">${a.module}</span></div>
+                                    <span style="font-size: 10px; padding:3px 8px; border-radius:4px; background:${a.color}15; color:${a.color}; font-weight:600;">${a.hasData ? 'LIVE' : 'NO DATA'}</span>
+                                </div>
+                                <div><div style="font-size: 10px; color: var(--dim); margin-bottom: 4px;">Avg Confidence</div><div style="font-size: 22px; font-weight: 700; color: var(--text); font-family: monospace;">${a.avgScore}${a.avgScore !== '—' ? '%' : ''}</div></div>
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--muted);"><span>Decisions: <strong>${a.decisions}</strong></span></div>
+                            </div>`).join('')}
+                    </div>
+                </div>
+
+                <!-- ── Scheduler Control Panel (Live) ──────────────────────── -->
+                <div class="card" id="scheduler-card">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+                        <div class="card-title" style="margin:0;">
+                            <i class="bi bi-clock-history" style="color:var(--accent);"></i>
+                            AI Scheduler Control
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span id="scheduler-live-badge" style="font-size:11px;padding:3px 10px;border-radius:6px;background:rgba(34,197,94,.1);color:#22C55E;border:1px solid rgba(34,197,94,.2);font-weight:600;display:none;">LIVE</span>
+                            <button id="scheduler-refresh-btn" style="padding:7px 13px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:5px;">
+                                <i class="bi bi-arrow-clockwise"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Status Row -->
+                    <div id="scheduler-status-row" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:20px;">
+                        <div style="padding:16px;border-radius:12px;border:1px solid rgba(91,140,255,.15);background:rgba(91,140,255,.05);">
+                            <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Status</div>
+                            <div id="sched-status-val" style="font-size:18px;font-weight:700;color:#22C55E;font-family:monospace;">—</div>
+                            <div id="sched-next-val" style="font-size:11px;color:var(--dim);margin-top:3px;">Loading...</div>
+                        </div>
+                        <div style="padding:16px;border-radius:12px;border:1px solid rgba(91,140,255,.15);background:rgba(91,140,255,.05);">
+                            <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Last Run</div>
+                            <div id="sched-lastrun-val" style="font-size:14px;font-weight:700;color:var(--text);font-family:monospace;">—</div>
+                            <div id="sched-trigger-val" style="font-size:11px;color:var(--dim);margin-top:3px;">—</div>
+                        </div>
+                        <div style="padding:16px;border-radius:12px;border:1px solid rgba(91,140,255,.15);background:rgba(91,140,255,.05);">
+                            <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Last Run Result</div>
+                            <div id="sched-decisions-val" style="font-size:22px;font-weight:700;color:var(--accent);font-family:monospace;">—</div>
+                            <div id="sched-users-val" style="font-size:11px;color:var(--dim);margin-top:3px;">decisions generated</div>
+                        </div>
+                        <div style="padding:16px;border-radius:12px;border:1px solid rgba(91,140,255,.15);background:rgba(91,140,255,.05);">
+                            <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Total Runs</div>
+                            <div id="sched-totalruns-val" style="font-size:22px;font-weight:700;color:var(--text);font-family:monospace;">—</div>
+                            <div style="font-size:11px;color:var(--dim);margin-top:3px;">since last boot</div>
+                        </div>
+                    </div>
+
+                    <!-- Manual Trigger Button -->
+                    <div style="display:flex;align-items:center;gap:12px;padding:16px;border-radius:12px;border:1px solid rgba(91,140,255,.2);background:rgba(91,140,255,.04);margin-bottom:20px;">
+                        <div style="flex:1;">
+                            <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:3px;">Manual AI Scan</div>
+                            <div style="font-size:12px;color:var(--dim);">Triggers the decision generator right now for all users. Results appear in ~5 seconds.</div>
+                        </div>
+                        <button id="scheduler-trigger-btn" style="padding:10px 20px;border-radius:10px;border:none;background:linear-gradient(135deg,#5B8CFF,#7C3AED);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:8px;transition:opacity .15s;">
+                            <i class="bi bi-play-fill"></i> Trigger Manual Scan
+                        </button>
+                    </div>
+
+                    <!-- Run History Table -->
+                    <div>
+                        <div style="font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;">Run History (Last 10)</div>
+                        <div id="scheduler-history" style="display:flex;flex-direction:column;gap:6px;">
+                            <div style="padding:24px;text-align:center;color:var(--dim);font-size:12px;">Loading history...</div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>`;
+
+            // ── Bind Scheduler Controls ──────────────────────────────────────
+            bindSchedulerControls();
+        };
+
+        async function loadSchedulerStatus() {
+            const data = await apiFetch('/api/v1/admin/scheduler/status');
+            if (!data) return;
+
+            document.getElementById('scheduler-live-badge').style.display = 'inline-block';
+
+            // Status card
+            const isRunning = data.is_running;
+            document.getElementById('sched-status-val').textContent    = isRunning ? '● Running' : '○ Stopped';
+            document.getElementById('sched-status-val').style.color    = isRunning ? '#22C55E' : '#EF4444';
+            document.getElementById('sched-totalruns-val').textContent  = data.total_runs ?? 0;
+
+            // Next run
+            if (data.next_run) {
+                const diff = Math.round((new Date(data.next_run) - Date.now()) / 60000);
+                document.getElementById('sched-next-val').textContent = diff > 0 ? `Next in ${diff} min` : 'Running now';
+            } else {
+                document.getElementById('sched-next-val').textContent = 'Scheduler offline';
+            }
+
+            // Last run
+            if (data.last_run) {
+                document.getElementById('sched-lastrun-val').textContent  = new Date(data.last_run).toLocaleString();
+                document.getElementById('sched-trigger-val').textContent  = `by ${data.last_result?.triggered_by || 'scheduler'} · ${data.last_result?.duration_s ?? '?'}s`;
+                document.getElementById('sched-decisions-val').textContent = data.last_result?.decisions ?? 0;
+                document.getElementById('sched-users-val').textContent     = `from ${data.last_result?.users ?? 0} users`;
+            } else {
+                document.getElementById('sched-lastrun-val').textContent = 'No runs yet';
+                document.getElementById('sched-trigger-val').textContent = 'Start backend & trigger manually';
+                document.getElementById('sched-decisions-val').textContent = '0';
+            }
+
+            // Run history table
+            const history = data.run_history || [];
+            const histEl  = document.getElementById('scheduler-history');
+            if (!history.length) {
+                histEl.innerHTML = `<div style="padding:16px;text-align:center;color:var(--dim);font-size:12px;">No runs recorded yet. Trigger a scan above.</div>`;
+                return;
+            }
+            histEl.innerHTML = history.map((h, i) => `
+                <div style="display:grid;grid-template-columns:28px 1fr 80px 80px 80px 80px;gap:12px;align-items:center;padding:10px 14px;border-radius:8px;border:1px solid var(--border);${i===0?'border-color:rgba(91,140,255,.3);background:rgba(91,140,255,.04);':''}">
+                    <span style="font-size:10px;font-weight:700;color:var(--dim);">#${data.total_runs - i}</span>
+                    <span style="font-size:12px;color:var(--muted);">${new Date(h.ts).toLocaleString()}</span>
+                    <span style="font-size:12px;font-weight:600;color:var(--accent);">${h.decisions} dec.</span>
+                    <span style="font-size:12px;color:var(--muted);">${h.users} users</span>
+                    <span style="font-size:12px;color:var(--dim);">${h.duration_s}s</span>
+                    <span style="font-size:10px;padding:2px 7px;border-radius:4px;${h.triggered_by==='admin'?'background:rgba(245,158,11,.1);color:#F59E0B;':'background:rgba(91,140,255,.1);color:#5B8CFF;'};font-weight:600;">${h.triggered_by}</span>
+                </div>`).join('');
+        }
+
+        function bindSchedulerControls() {
+            loadSchedulerStatus();
+
+            document.getElementById('scheduler-refresh-btn')?.addEventListener('click', loadSchedulerStatus);
+
+            document.getElementById('scheduler-trigger-btn')?.addEventListener('click', async function () {
+                const btn = this;
+                btn.disabled = true;
+                btn.innerHTML = '<div style="width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;"></div> Triggering...';
+
+                try {
+                    const token = localStorage.getItem('neuralorbit_token');
+                    const res = await fetch((window.BACKEND_URL || 'http://127.0.0.1:8000') + '/api/v1/admin/scheduler/trigger', {
+                        method: 'POST',
+                        signal: AbortSignal.timeout(8000),
+                        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                    });
+                    const data = await res.json();
+
+                    btn.innerHTML = '<i class="bi bi-check-lg"></i> Scan Started!';
+                    btn.style.background = 'linear-gradient(135deg,#22C55E,#16A34A)';
+
+                    // Auto-refresh status after 6 seconds
+                    setTimeout(() => {
+                        loadSchedulerStatus();
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="bi bi-play-fill"></i> Trigger Manual Scan';
+                        btn.style.background = 'linear-gradient(135deg,#5B8CFF,#7C3AED)';
+                    }, 6000);
+
+                } catch (e) {
+                    btn.innerHTML = '<i class="bi bi-x-lg"></i> Failed — Backend offline?';
+                    btn.style.background = 'rgba(239,68,68,.2)';
+                    setTimeout(() => {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="bi bi-play-fill"></i> Trigger Manual Scan';
+                        btn.style.background = 'linear-gradient(135deg,#5B8CFF,#7C3AED)';
+                    }, 3000);
+                }
+            });
+        }
+
+        window.addEventListener('router-ready', () => window.loadAnalyticsPage?.());
+    </script>
+</body>
+
+</html>

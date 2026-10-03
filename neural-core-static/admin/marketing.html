@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuralOrbit — Marketing Module (Admin)</title>
+    <meta name="description" content="NeuralOrbit Admin Marketing — cross-user campaign decisions and AI activity" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/layout.css" />
+    <link rel="stylesheet" href="../css/components.css" />
+</head>
+<body data-module="admin-marketing" data-role="admin">
+    <div id="app-shell" class="app-shell">
+        <aside id="sidebar" class="sidebar"></aside>
+        <div class="main-area" id="main-area">
+            <header id="topnav" class="topnav"></header>
+            <main id="page-content" class="page-content"><div class="page-loading"><div class="loading-spinner"></div></div></main>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="../js/config.js"></script>
+    <script src="../js/supabase-client.js"></script><script src="../js/auth.js"></script>
+<script src="../js/api.js"></script>
+    <script src="../js/guard.js"></script><script src="../js/shell.js"></script>
+    <script src="../js/router.js"></script><script src="../js/overview.js"></script>
+    <script src="../js/decision-log.js"></script><script src="../js/reward-engine.js"></script>
+    <script src="../js/autonomy.js"></script><script src="../js/learning.js"></script>
+    <script src="../js/sandbox.js"></script><script src="../js/modules.js"></script>
+    <script src="../js/admin-module-page.js"></script>
+    <script src="../js/app.js"></script>
+    <script>
+    /* Admin Marketing Page — config only; shared logic in js/admin-module-page.js */
+    window.loadMarketingAdminPage = window.createAdminModulePage({
+        module: 'marketing',
+        idPrefix: 'mkt',
+        title: 'Marketing Module',
+        subtitle: 'All-user campaign decisions and AI activity.',
+        confidenceColor: (p) => p >= 90 ? '#22C55E' : p >= 70 ? '#8B5CF6' : '#F59E0B',
+        kpiDefs: [
+            { key: 'roas', label: 'ROAS', icon: 'bi-graph-up-arrow', color: '#8B5CF6', suffix: 'x' },
+            { key: 'cpl', label: 'Cost Per Lead', icon: 'bi-coin', color: '#F59E0B', prefix: '$' },
+            { key: 'active_campaigns', label: 'Active Campaigns', icon: 'bi-megaphone-fill', color: '#5B8CFF' },
+            { key: 'conversion_rate', label: 'Ad Conv. Rate', icon: 'bi-percent', color: '#22C55E', suffix: '%' },
+        ],
+        demoDecisions: [
+            { id: 'm1', module: 'marketing', action: 'Pause underperforming Meta campaign — ROAS below 1.5x', outcome: 'pending', confidence: 0.85, observe_only: false, auto_executed: false, created_at: new Date().toISOString(), reasoning: 'Campaign ROAS dropped to 1.2x over 3 days.' },
+            { id: 'm2', module: 'marketing', action: 'Increase Google Ads budget — conversion rate at 8.4%', outcome: 'applied', confidence: 0.91, observe_only: false, auto_executed: true, created_at: new Date(Date.now() - 86400000).toISOString(), reasoning: 'High conversion rate warrants increased spend.' },
+            { id: 'm3', module: 'marketing', action: 'Test new ad creative for SaaS segment', outcome: 'pending', confidence: 0.74, observe_only: true, auto_executed: false, created_at: new Date(Date.now() - 172800000).toISOString(), reasoning: 'Observe mode: creative fatigue detected.' },
+            { id: 'm4', module: 'marketing', action: 'Reduce budget for healthcare vertical by 20%', outcome: 'rejected', confidence: 0.68, observe_only: false, auto_executed: false, created_at: new Date(Date.now() - 259200000).toISOString(), reasoning: 'Healthcare CPL too high relative to LTV.' },
+        ],
+    });
+    </script>
+</body>
+</html>

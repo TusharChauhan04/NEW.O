@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuralOrbit — All-User Decision Log (Admin)</title>
+    <meta name="description" content="Admin view of all AI decisions across every user" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/layout.css" />
+    <link rel="stylesheet" href="../css/components.css" />
+    <style>
+        .decision-drawer-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 9000;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity .2s;
+        }
+        .decision-drawer-overlay.visible { opacity: 1; pointer-events: auto; }
+        .decision-drawer {
+            width: 560px; max-width: 96vw; max-height: 88vh; overflow-y: auto;
+            border-radius: 18px; border: 1px solid var(--border);
+            background: var(--surface-low); padding: 26px;
+            display: flex; flex-direction: column; gap: 16px;
+            box-shadow: 0 24px 80px rgba(0,0,0,.6);
+            transform: translateY(14px); transition: transform .2s;
+        }
+        .decision-drawer-overlay.visible .decision-drawer { transform: translateY(0); }
+        .conf-bar-wrap { height: 6px; border-radius: 3px; background: var(--border-light); overflow: hidden; }
+        .conf-bar { height: 100%; border-radius: 3px; transition: width .4s ease; }
+    </style>
+</head>
+
+<body data-module="decisions" data-role="admin">
+    <div id="app-shell" class="app-shell">
+        <aside id="sidebar" class="sidebar"></aside>
+        <div class="main-area" id="main-area">
+            <header id="topnav" class="topnav"></header>
+            <main id="page-content" class="page-content">
+                <div class="page-loading"><div class="loading-spinner"></div></div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Decision detail drawer -->
+    <div class="decision-drawer-overlay" id="decision-drawer-overlay">
+        <div class="decision-drawer" id="decision-drawer">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+                <div>
+                    <div style="font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;">DECISION DETAIL</div>
+                    <div id="drawer-title" style="font-size:17px;font-weight:700;color:var(--text);margin-top:4px;line-height:1.4;"></div>
+                </div>
+                <button id="drawer-close" aria-label="Close decision details" style="padding:8px;background:transparent;border:none;cursor:pointer;color:var(--muted);">
+                    <i class="bi bi-x-lg" style="font-size:16px;"></i>
+                </button>
+            </div>
+            <div id="drawer-meta" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            <div style="height:1px;background:var(--border-light);"></div>
+            <div>
+                <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Reasoning</div>
+                <div id="drawer-reasoning" style="font-size:13px;color:var(--muted);line-height:1.6;padding:12px;border-radius:10px;background:rgba(91,140,255,.04);border:1px solid rgba(91,140,255,.1);"></div>
+            </div>
+            <div>
+                <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">AI Confidence</div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <div class="conf-bar-wrap" style="flex:1;"><div id="drawer-conf-bar" class="conf-bar"></div></div>
+                    <span id="drawer-conf-val" style="font-size:14px;font-weight:700;font-family:monospace;"></span>
+                </div>
+            </div>
+            <div id="drawer-alternatives-wrap">
+                <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Alternatives Considered</div>
+                <div id="drawer-alternatives" style="display:flex;flex-direction:column;gap:6px;"></div>
+            </div>
+            <div style="height:1px;background:var(--border-light);"></div>
+            <div style="display:flex;gap:10px;" id="drawer-actions"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="../js/config.js"></script>
+    <script src="../js/supabase-client.js"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/guard.js"></script>
+    <script src="../js/shell.js"></script>
+    <script src="../js/router.js"></script>
+    <script src="../js/app.js"></script>
+    <script>
+        /* ============================================================
+           admin/decisions.html — All-User Decision Log
+           Uses existing GET /api/v1/decisions?all=true (admin-gated)
+           and existing PATCH /api/v1/decisions/{id}/outcome
+           ZERO new backend endpoints required.
+        ============================================================ */
+        const BACKEND = window.BACKEND_URL || 'http://127.0.0.1:8000';
+        let _decisions  = [];
+        let _filtered   = [];
+        let _activeModule  = 'all';
+        let _activeOutcome = 'all';
+        let _searchQuery   = '';
+        let _usingDemo     = false;
+        let _openDecisionId = null;
+
+        const MOD_COLORS = {
+            'neural-orbit': '#5B8CFF', crm: '#5B8CFF', marketing: '#8B5CF6',
+            shield: '#F59E0B', website: '#22C55E', system: '#94A3B8',
+        };
+        const OUT_COLORS = {
+            pending:  '#5B8CFF',
+            applied:  '#22C55E',
+            rejected: '#EF4444',
+        };
+
+        async function apiFetch(path, opts = {}) {
+            try {
+                const token = localStorage.getItem('neuralorbit_token');
+                const res = await fetch(BACKEND + path, {
+                    ...opts,
+                    signal: AbortSignal.timeout(7000),
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                        ...(opts.headers || {}),
+                    },
+                });
+                if (!res.ok) return null;
+                return await res.json();
+            } catch { return null; }
+        }
+
+        /* ── Page loader ─────────────────────────────────────────── */
+        window.loadDecisionsPage = async function () {
+            const content = document.getElementById('page-content');
+            if (!content) return;
+
+            // Skeleton
+            content.innerHTML = `<div style="padding:24px;display:flex;flex-direction:column;gap:16px;">
+                ${Array(5).fill('<div style="height:72px;border-radius:12px;background:rgba(91,140,255,.05);animation:pulse 1.5s infinite;"></div>').join('')}
+            </div>`;
+
+            // Use existing endpoint — admin token gives all=true access
+            const data = await apiFetch('/api/v1/decisions?all=true&limit=200');
+
+            if (data && Array.isArray(data.decisions) && data.decisions.length) {
+                _usingDemo = false;
+                _decisions = data.decisions;
+            } else {
+                _usingDemo = true;
+                _decisions = getDemoDecisions();
+            }
+
+            _filtered = [..._decisions];
+            renderPage(content);
+            bindPageEvents();
+        };
+
+        function getDemoDecisions() {
+            const now = Date.now();
+            return [
+                { id: 'DEC-001', user_id: 'USR-001xxxx', module: 'crm',       action: 'Re-engage 3 cold leads with personalised email sequence', confidence: 87, outcome: 'pending',  created_at: new Date(now - 600000).toISOString(),  reasoning: 'These leads have not responded in 14+ days but their company recently raised funding — high re-engagement probability.', alternatives: ['Drop from pipeline', 'Assign to human SDR'] },
+                { id: 'DEC-002', user_id: 'USR-002xxxx', module: 'shield',     action: 'Block login from IP 45.33.22.11 (unusual geo-location)',  confidence: 96, outcome: 'applied',  created_at: new Date(now - 3600000).toISOString(), reasoning: 'IP originates from a country never seen in this account\'s login history. Risk score: 9.4/10.', alternatives: ['Flag for 2FA only', 'Send alert email'] },
+                { id: 'DEC-003', user_id: 'USR-003xxxx', module: 'marketing',  action: 'Increase LinkedIn ad budget by 22% for SaaS segment',     confidence: 74, outcome: 'rejected', created_at: new Date(now - 7200000).toISOString(), reasoning: 'LinkedIn CTR improved 31% over the last 7 days. Model projects +18% conversion if budget is increased.', alternatives: ['Keep budget flat', 'Reduce Facebook instead'] },
+                { id: 'DEC-004', user_id: 'USR-001xxxx', module: 'website',    action: 'Set hero CTA to "Start Free Trial" for mobile visitors',  confidence: 91, outcome: 'pending',  created_at: new Date(now - 10800000).toISOString(),reasoning: 'A/B test ran for 7 days. Variant B conversion rate: 4.2% vs control 2.8%. Statistically significant (p < 0.03).', alternatives: ['Keep current CTA', 'Run longer test'] },
+                { id: 'DEC-005', user_id: 'USR-002xxxx', module: 'crm',        action: 'Auto-close 12 stale deals (> 60 days no activity)',       confidence: 82, outcome: 'pending',  created_at: new Date(now - 14400000).toISOString(),reasoning: 'These deals have been open for 60+ days with zero activity. Closing them will clean the pipeline and improve forecast accuracy.', alternatives: ['Move to nurture', 'Escalate to manager'] },
+            ];
+        }
+
+        /* ── Main render ─────────────────────────────────────────── */
+        function renderPage(content) {
+            const total    = _decisions.length;
+            const pending  = _decisions.filter(d => d.outcome === 'pending').length;
+            const applied  = _decisions.filter(d => d.outcome === 'applied').length;
+            const rejected = _decisions.filter(d => d.outcome === 'rejected').length;
+            const modules  = [...new Set(_decisions.map(d => d.module || 'system'))].sort();
+
+            content.innerHTML = `
+            <div class="page-animate" style="padding:24px;display:flex;flex-direction:column;gap:24px;">
+
+                <!-- Header -->
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+                    <div>
+                        <h1 class="page-title">Decision Log — All Users</h1>
+                        <p class="page-subtitle">Review, approve, or reject AI decisions across every user account</p>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        ${_usingDemo ? '<span style="font-size:11px;padding:4px 10px;border-radius:6px;background:rgba(245,158,11,.1);color:#F59E0B;border:1px solid rgba(245,158,11,.2);font-weight:600;">DEMO</span>' : '<span style="font-size:11px;padding:4px 10px;border-radius:6px;background:rgba(34,197,94,.1);color:#22C55E;border:1px solid rgba(34,197,94,.2);font-weight:600;">LIVE</span>'}
+                        <button id="decisions-refresh-btn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:6px;">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Stat cards -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;">
+                    ${[
+                        { label: 'Total Decisions', value: total,    color: '#5B8CFF', icon: 'bi-journal-text' },
+                        { label: 'Pending',         value: pending,  color: '#5B8CFF', icon: 'bi-hourglass-split' },
+                        { label: 'Applied',         value: applied,  color: '#22C55E', icon: 'bi-check-circle-fill' },
+                        { label: 'Rejected',        value: rejected, color: '#EF4444', icon: 'bi-x-circle-fill' },
+                    ].map(s => `
+                        <div class="card card-sm" style="display:flex;align-items:center;gap:14px;">
+                            <div style="width:42px;height:42px;border-radius:12px;background:${s.color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                <i class="bi ${s.icon}" style="font-size:18px;color:${s.color};"></i>
+                            </div>
+                            <div>
+                                <div style="font-size:24px;font-weight:700;color:var(--text);">${s.value}</div>
+                                <div style="font-size:11px;color:var(--dim);">${s.label}</div>
+                            </div>
+                        </div>`).join('')}
+                </div>
+
+                <!-- Filters -->
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:200px;display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:var(--radius);border:1px solid var(--border);background:rgba(30,41,59,0.5);">
+                        <i class="bi bi-search" style="color:var(--dim);font-size:13px;"></i>
+                        <input id="decisions-search" type="text" placeholder="Search actions, user IDs…" aria-label="Search decisions by action or user ID" style="flex:1;background:transparent;border:none;outline:none;color:var(--text);font-size:13px;font-family:var(--font);" />
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;" id="module-filters">
+                        <button class="dec-filter-btn is-active" data-type="module" data-val="all"
+                            style="padding:8px 13px;border-radius:8px;border:1px solid rgba(91,140,255,.4);background:rgba(91,140,255,.1);color:var(--accent);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font);">All Modules</button>
+                        ${modules.map(m => {
+                            const c = MOD_COLORS[m] || '#94A3B8';
+                            return `<button class="dec-filter-btn" data-type="module" data-val="${m}"
+                                style="padding:8px 13px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--font);text-transform:capitalize;">${m}</button>`;
+                        }).join('')}
+                    </div>
+                    <div style="display:flex;gap:6px;" id="outcome-filters">
+                        ${['all','pending','applied','rejected'].map(o => `
+                            <button class="dec-filter-btn ${o==='all'?'is-active':''}" data-type="outcome" data-val="${o}"
+                                style="padding:8px 13px;border-radius:8px;border:1px solid ${o==='all'?'rgba(91,140,255,.4)':'var(--border)'};background:${o==='all'?'rgba(91,140,255,.1)':'transparent'};color:${o==='all'?'var(--accent)':'var(--muted)'};font-size:11px;font-weight:600;cursor:pointer;font-family:var(--font);text-transform:capitalize;">${o === 'all' ? 'All Outcomes' : o}</button>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <!-- Decision feed -->
+                <div class="card" style="padding:0;overflow:hidden;">
+                    <div style="display:grid;grid-template-columns:2fr 100px 80px 100px 96px 110px;gap:12px;padding:11px 20px;border-bottom:1px solid var(--border-light);background:rgba(17,24,39,.9);">
+                        ${['ACTION','MODULE','CONF.','STATUS','USER ID','ADMIN'].map(h =>
+                            `<span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;">${h}</span>`
+                        ).join('')}
+                    </div>
+                    <div id="decisions-rows">
+                        ${buildRows(_decisions)}
+                    </div>
+                </div>
+
+            </div>`;
+        }
+
+        function buildRows(decisions) {
+            if (!decisions.length) {
+                return `<div style="padding:48px;text-align:center;color:var(--dim);">
+                    <i class="bi bi-journal-text" style="font-size:36px;display:block;margin-bottom:12px;opacity:.4;"></i>
+                    <div>No decisions match the current filters</div>
+                </div>`;
+            }
+            return decisions.map(d => {
+                const mc  = MOD_COLORS[d.module] || '#94A3B8';
+                const oc  = OUT_COLORS[d.outcome] || '#94A3B8';
+                const conf = d.confidence || 0;
+                const confColor = conf >= 90 ? '#22C55E' : conf >= 70 ? '#F59E0B' : '#EF4444';
+                const ts = d.created_at ? new Date(d.created_at).toLocaleString() : '—';
+                const uid = (d.user_id || '').substring(0, 8);
+                return `
+                <div class="decision-row" data-id="${escHtml(d.id)}"
+                    style="display:grid;grid-template-columns:2fr 100px 80px 100px 96px 110px;gap:12px;padding:14px 20px;border-bottom:1px solid rgba(91,140,255,.04);align-items:center;cursor:pointer;transition:background .12s;"
+                    onmouseover="this.style.background='rgba(91,140,255,.04)'" onmouseout="this.style.background=''">
+                    <div style="min-width:0;">
+                        <div style="font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(d.action || '—')}</div>
+                        <div style="font-size:11px;color:var(--dim);margin-top:2px;">${ts}</div>
+                    </div>
+                    <div><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:5px;color:${mc};background:${mc}18;text-transform:capitalize;">${d.module || '—'}</span></div>
+                    <div style="font-size:13px;font-weight:700;color:${confColor};font-family:monospace;">${conf}%</div>
+                    <div><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:5px;color:${oc};background:${oc}18;text-transform:capitalize;">${d.outcome || 'pending'}</span></div>
+                    <div style="font-size:11px;color:var(--dim);font-family:monospace;">${uid}…</div>
+                    <div style="display:flex;gap:5px;">
+                        ${d.outcome === 'pending' ? `
+                            <button class="dec-approve-btn" data-id="${escHtml(d.id)}" style="padding:4px 9px;border-radius:6px;border:1px solid rgba(34,197,94,.3);background:rgba(34,197,94,.08);color:#22C55E;font-size:10px;font-weight:700;cursor:pointer;font-family:var(--font);" onclick="event.stopPropagation()">✓ Apply</button>
+                            <button class="dec-reject-btn"  data-id="${escHtml(d.id)}" style="padding:4px 9px;border-radius:6px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.08);color:#EF4444;font-size:10px;font-weight:700;cursor:pointer;font-family:var(--font);" onclick="event.stopPropagation()">✗ Reject</button>
+                        ` : `<span style="font-size:10px;color:var(--dim);">${escHtml(d.outcome)}</span>`}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        /* ── Bind events ─────────────────────────────────────────── */
+        function bindPageEvents() {
+            // Refresh
+            document.getElementById('decisions-refresh-btn')?.addEventListener('click', () => window.loadDecisionsPage());
+
+            // Search
+            document.getElementById('decisions-search')?.addEventListener('input', e => {
+                _searchQuery = e.target.value.toLowerCase().trim();
+                applyFilters();
+            });
+
+            // Filter buttons
+            document.addEventListener('click', e => {
+                const btn = e.target.closest('.dec-filter-btn');
+                if (!btn) return;
+                const type = btn.dataset.type;
+                const val  = btn.dataset.val;
+                if (type === 'module')  _activeModule  = val;
+                if (type === 'outcome') _activeOutcome = val;
+
+                // Update active styling for this group
+                document.querySelectorAll(`.dec-filter-btn[data-type="${type}"]`).forEach(b => {
+                    const on = b.dataset.val === val;
+                    b.style.background   = on ? 'rgba(91,140,255,.1)' : 'transparent';
+                    b.style.color        = on ? 'var(--accent)' : 'var(--muted)';
+                    b.style.borderColor  = on ? 'rgba(91,140,255,.4)' : 'var(--border)';
+                });
+                applyFilters();
+            });
+
+            // Row click → open drawer
+            document.addEventListener('click', e => {
+                const row = e.target.closest('.decision-row');
+                if (row) openDrawer(row.dataset.id);
+            });
+
+            // Approve / Reject buttons
+            document.addEventListener('click', async e => {
+                const approveBtn = e.target.closest('.dec-approve-btn');
+                const rejectBtn  = e.target.closest('.dec-reject-btn');
+                if (!approveBtn && !rejectBtn) return;
+                const id      = (approveBtn || rejectBtn).dataset.id;
+                const outcome = approveBtn ? 'applied' : 'rejected';
+                await updateOutcome(id, outcome);
+            });
+
+            // Drawer close
+            document.getElementById('drawer-close')?.addEventListener('click', closeDrawer);
+            document.getElementById('decision-drawer-overlay')?.addEventListener('click', e => {
+                if (e.target.id === 'decision-drawer-overlay') closeDrawer();
+            });
+        }
+
+        function applyFilters() {
+            _filtered = _decisions.filter(d => {
+                const modOK  = _activeModule  === 'all' || d.module   === _activeModule;
+                const outOK  = _activeOutcome === 'all' || d.outcome  === _activeOutcome;
+                const srchOK = !_searchQuery  ||
+                    (d.action   || '').toLowerCase().includes(_searchQuery) ||
+                    (d.user_id  || '').toLowerCase().includes(_searchQuery) ||
+                    (d.module   || '').toLowerCase().includes(_searchQuery) ||
+                    (d.reasoning|| '').toLowerCase().includes(_searchQuery);
+                return modOK && outOK && srchOK;
+            });
+            const wrap = document.getElementById('decisions-rows');
+            if (wrap) wrap.innerHTML = buildRows(_filtered);
+        }
+
+        async function updateOutcome(id, outcome) {
+            // Optimistic update
+            const dec = _decisions.find(d => d.id === id);
+            if (dec) dec.outcome = outcome;
+            applyFilters();
+            if (_openDecisionId === id) openDrawer(id); // refresh drawer if open
+
+            // Persist — uses existing endpoint, no new endpoint needed
+            await apiFetch(`/api/v1/decisions/${encodeURIComponent(id)}/outcome`, {
+                method: 'PATCH',
+                body: JSON.stringify({ outcome }),
+            });
+        }
+
+        /* ── Decision detail drawer ──────────────────────────────── */
+        function openDrawer(id) {
+            const d = _decisions.find(d => d.id === id);
+            if (!d) return;
+            _openDecisionId = id;
+            const mc   = MOD_COLORS[d.module] || '#94A3B8';
+            const oc   = OUT_COLORS[d.outcome] || '#94A3B8';
+            const conf = d.confidence || 0;
+            const confColor = conf >= 90 ? '#22C55E' : conf >= 70 ? '#F59E0B' : '#EF4444';
+
+            document.getElementById('drawer-title').textContent = d.action || '—';
+            document.getElementById('drawer-meta').innerHTML = [
+                `<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:5px;color:${mc};background:${mc}18;text-transform:capitalize;">${escHtml(d.module)}</span>`,
+                `<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:5px;color:${oc};background:${oc}18;text-transform:capitalize;">${d.outcome}</span>`,
+                `<span style="font-size:11px;color:var(--dim);">User: ${(d.user_id||'').substring(0,8)}…</span>`,
+                `<span style="font-size:11px;color:var(--dim);">${d.created_at ? new Date(d.created_at).toLocaleString() : ''}</span>`,
+            ].join('');
+            document.getElementById('drawer-reasoning').textContent = d.reasoning || 'No reasoning provided.';
+            document.getElementById('drawer-conf-bar').style.width = `${conf}%`;
+            document.getElementById('drawer-conf-bar').style.background = confColor;
+            document.getElementById('drawer-conf-val').textContent = `${conf}%`;
+            document.getElementById('drawer-conf-val').style.color = confColor;
+
+            const alts = Array.isArray(d.alternatives) ? d.alternatives : [];
+            const altWrap = document.getElementById('drawer-alternatives-wrap');
+            const altEl   = document.getElementById('drawer-alternatives');
+            if (!alts.length) {
+                altWrap.style.display = 'none';
+            } else {
+                altWrap.style.display = '';
+                altEl.innerHTML = alts.map(a =>
+                    `<div style="padding:9px 12px;border-radius:8px;border:1px solid var(--border-light);font-size:12px;color:var(--muted);">↳ ${a}</div>`
+                ).join('');
+            }
+
+            // Action buttons
+            const actEl = document.getElementById('drawer-actions');
+            actEl.innerHTML = d.outcome === 'pending' ? `
+                <button onclick="updateOutcome('${d.id}','applied');closeDrawer();"
+                    style="flex:1;padding:11px;border-radius:10px;border:none;background:rgba(34,197,94,.12);color:#22C55E;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font);">
+                    ✓ Apply Decision
+                </button>
+                <button onclick="updateOutcome('${d.id}','rejected');closeDrawer();"
+                    style="flex:1;padding:11px;border-radius:10px;border:none;background:rgba(239,68,68,.12);color:#EF4444;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font);">
+                    ✗ Reject Decision
+                </button>` :
+                `<div style="font-size:13px;color:var(--dim);text-align:center;width:100%;padding:8px;">Decision already <strong style="color:${oc};">${d.outcome}</strong></div>`;
+
+            document.getElementById('decision-drawer-overlay').classList.add('visible');
+        }
+
+        function closeDrawer() {
+            document.getElementById('decision-drawer-overlay').classList.remove('visible');
+            _openDecisionId = null;
+        }
+
+        window.loadDecisionsPage = window.loadDecisionsPage;
+        window.addEventListener('router-ready', () => window.loadDecisionsPage?.());
+    </script>
+</body>
+
+</html>

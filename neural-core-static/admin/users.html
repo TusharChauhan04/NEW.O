@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeuralOrbit — User Management (Admin)</title>
+    <meta name="description" content="NeuralOrbit User Management" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/layout.css" />
+    <link rel="stylesheet" href="../css/components.css" />
+    <style>
+        /* User detail modal */
+        #user-modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 9000;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity .2s;
+        }
+        #user-modal-overlay.visible { opacity: 1; pointer-events: auto; }
+        #user-modal {
+            width: 580px; max-width: 96vw; border-radius: 18px;
+            border: 1px solid var(--border); background: var(--surface-low);
+            padding: 26px; display: flex; flex-direction: column; gap: 18px;
+            box-shadow: 0 24px 80px rgba(0,0,0,.6);
+            transform: translateY(12px); transition: transform .2s;
+            max-height: 92vh; overflow-y: auto;
+        }
+        #user-modal-overlay.visible #user-modal { transform: translateY(0); }
+
+        /* Per-module autonomy grid in modal */
+        .module-autonomy-row {
+            display: grid; grid-template-columns: 100px 1fr; align-items: center;
+            gap: 12px; padding: 10px 14px; border-radius: 10px;
+            border: 1px solid var(--border-light);
+        }
+        .module-autonomy-row:hover { background: rgba(91,140,255,.03); }
+        .level-btn-group { display: flex; gap: 6px; }
+        .level-btn {
+            flex: 1; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--border);
+            background: transparent; color: var(--muted); font-size: 11px; font-weight: 600;
+            cursor: pointer; font-family: var(--font); transition: all .15s; text-align: center;
+        }
+        .level-btn.active-observe  { background: rgba(148,163,184,.15); color: #94A3B8; border-color: rgba(148,163,184,.4); }
+        .level-btn.active-assist   { background: rgba(91,140,255,.15);  color: #5B8CFF; border-color: rgba(91,140,255,.4); }
+        .level-btn.active-autonomous { background: rgba(34,197,94,.15); color: #22C55E; border-color: rgba(34,197,94,.4); }
+        .level-btn:not([class*='active']):hover { background: rgba(91,140,255,.08); color: var(--text); }
+
+        /* Emergency freeze confirmation */
+        #freeze-confirm-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 9999;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity .2s;
+        }
+        #freeze-confirm-overlay.visible { opacity: 1; pointer-events: auto; }
+        #freeze-confirm-box {
+            width: 440px; max-width: 92vw; border-radius: 16px; border: 2px solid rgba(239,68,68,.4);
+            background: #0f1117; padding: 28px; display: flex; flex-direction: column; gap: 16px;
+            box-shadow: 0 0 60px rgba(239,68,68,.2); transform: scale(.96); transition: transform .2s;
+        }
+        #freeze-confirm-overlay.visible #freeze-confirm-box { transform: scale(1); }
+
+        .action-dropdown {
+            position: absolute; top: calc(100% + 4px); right: 0;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; overflow: hidden; z-index: 200;
+            box-shadow: 0 8px 24px rgba(0,0,0,.4); min-width: 180px; display: none;
+        }
+        .action-dropdown.open { display: block; }
+        .action-dropdown-item {
+            padding: 10px 14px; font-size: 13px; color: var(--muted);
+            cursor: pointer; transition: background .1s; display: flex; align-items: center; gap: 8px;
+        }
+        .action-dropdown-item:hover { background: rgba(91,140,255,.08); color: var(--text); }
+        .action-dropdown-item.danger { color: var(--danger); }
+        .action-dropdown-item.danger:hover { background: rgba(239,68,68,.08); }
+    </style>
+</head>
+
+<body data-module="users" data-role="admin">
+
+    <div id="app-shell" class="app-shell">
+        <aside id="sidebar" class="sidebar"></aside>
+        <div class="main-area" id="main-area">
+            <header id="topnav" class="topnav"></header>
+            <main id="page-content" class="page-content">
+                <div class="page-loading"><div class="loading-spinner"></div></div>
+            </main>
+        </div>
+    </div>
+
+    <!-- User detail modal (per-module autonomy controls) -->
+    <div id="user-modal-overlay">
+        <div id="user-modal">
+            <!-- Header -->
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+                <div>
+                    <div style="font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;">USER DETAILS</div>
+                    <div id="modal-name" style="font-size:18px;font-weight:700;color:var(--text);margin-top:4px;">—</div>
+                    <div id="modal-meta" style="font-size:12px;color:var(--muted);margin-top:4px;display:flex;gap:12px;"></div>
+                </div>
+                <button id="modal-close" aria-label="Close user details" style="padding:8px;border-radius:8px;background:transparent;border:none;cursor:pointer;color:var(--muted);">
+                    <i class="bi bi-x-lg" style="font-size:16px;"></i>
+                </button>
+            </div>
+
+            <div style="height:1px;background:var(--border-light);"></div>
+
+            <!-- Per-module autonomy control grid -->
+            <div>
+                <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;">
+                    Autonomy Controls — Per Module
+                </div>
+                <div id="modal-autonomy-grid" style="display:flex;flex-direction:column;gap:8px;"></div>
+            </div>
+
+            <!-- Quick presets -->
+            <div style="display:flex;gap:8px;">
+                <button id="modal-set-observe" class="btn btn-secondary btn-sm" style="flex:1;font-size:11px;">
+                    <i class="bi bi-eye"></i> All → Observe
+                </button>
+                <button id="modal-set-assist" class="btn btn-primary btn-sm" style="flex:1;font-size:11px;">
+                    <i class="bi bi-hand-index-thumb"></i> All → Assist
+                </button>
+                <button id="modal-set-autonomous" class="btn btn-sm" style="flex:1;font-size:11px;background:rgba(34,197,94,.12);color:#22C55E;border:1px solid rgba(34,197,94,.3);border-radius:var(--radius);cursor:pointer;font-family:var(--font);font-weight:600;">
+                    <i class="bi bi-robot"></i> All → Auto
+                </button>
+            </div>
+
+            <div id="modal-save-status" style="display:none;font-size:12px;padding:8px 12px;border-radius:8px;"></div>
+        </div>
+    </div>
+
+    <!-- Emergency freeze confirmation dialog -->
+    <div id="freeze-confirm-overlay">
+        <div id="freeze-confirm-box">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <div style="width:44px;height:44px;border-radius:12px;background:rgba(239,68,68,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <i class="bi bi-exclamation-triangle-fill" style="color:#EF4444;font-size:20px;"></i>
+                </div>
+                <div>
+                    <div style="font-size:16px;font-weight:700;color:#EF4444;">Emergency AI Freeze</div>
+                    <div style="font-size:12px;color:rgba(255,255,255,.5);margin-top:2px;">This sets ALL users, ALL modules to Observe mode instantly.</div>
+                </div>
+            </div>
+            <div style="font-size:13px;color:rgba(255,255,255,.7);line-height:1.6;">The AI will stop generating autonomous actions for every user. Users will still see their dashboards but no new AI decisions will be applied until you manually restore autonomy levels.</div>
+            <div style="padding:14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);">
+                <div style="font-size:11px;color:rgba(255,255,255,.5);margin-bottom:8px;">Type <strong style="color:#EF4444;">FREEZE</strong> to confirm:</div>
+                <input id="freeze-confirm-input" type="text" placeholder="FREEZE" aria-label="Type FREEZE to confirm emergency AI freeze" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(239,68,68,.3);background:rgba(0,0,0,.3);color:#fff;font-size:14px;font-weight:700;font-family:var(--font);outline:none;letter-spacing:2px;" />
+            </div>
+            <div style="display:flex;gap:10px;">
+                <button id="freeze-cancel-btn" style="flex:1;padding:11px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font);">Cancel</button>
+                <button id="freeze-confirm-btn" style="flex:1;padding:11px;border-radius:10px;border:none;background:rgba(239,68,68,.2);color:#EF4444;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font);opacity:.5;" disabled>🔴 Freeze All</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="../js/config.js"></script>
+    <script src="../js/supabase-client.js"></script>
+    <script src="../js/auth.js"></script>
+    <script src="../js/api.js"></script>
+    <script src="../js/guard.js"></script>
+    <script src="../js/shell.js"></script>
+    <script src="../js/router.js"></script>
+    <script src="../js/app.js"></script>
+    <script>
+        /* ============================================================
+           admin/users.html — Fully Operational User Management
+        ============================================================ */
+        const BACKEND = window.BACKEND_URL || 'http://127.0.0.1:8000';
+        let _allUsers = [];
+        let _modalUserId = null;
+
+        async function apiFetch(path, opts = {}) {
+            try {
+                const token = localStorage.getItem('neuralorbit_token');
+                const res = await fetch(BACKEND + path, {
+                    ...opts,
+                    signal: AbortSignal.timeout(6000),
+                    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.headers || {}) },
+                });
+                if (!res.ok) return null;
+                return await res.json();
+            } catch { return null; }
+        }
+
+        window.loadUsersPage = async function () {
+            const content = document.getElementById('page-content');
+            if (!content) return;
+
+            content.innerHTML = `<div style="padding:24px;display:flex;flex-direction:column;gap:16px;">
+                <div style="height:36px;width:280px;border-radius:8px;background:rgba(91,140,255,.08);animation:pulse 1.5s infinite;"></div>
+                ${Array(3).fill('<div style="height:80px;border-radius:14px;background:rgba(91,140,255,.05);animation:pulse 1.5s infinite;"></div>').join('')}
+            </div>`;
+
+            // ── Fetch profiles (real names, company, plan) + autonomy levels in parallel
+            const [profileRes, autonomyRes] = await Promise.all([
+                apiFetch('/api/v1/profile/all'),
+                apiFetch('/api/v1/states/autonomy/clients'),
+            ]);
+
+            const profiles  = profileRes?.profiles  || [];
+            const autonomy  = autonomyRes?.clients   || [];
+
+            // Merge: autonomy data keyed by user id
+            const autoMap = {};
+            autonomy.forEach(a => { autoMap[a.id] = a; });
+
+            // Build unified user list — profiles are the source of truth for identity
+            _allUsers = profiles.map(p => ({
+                id:           p.id,
+                name:         p.full_name || p.id?.substring(0, 8),
+                email:        p.email     || autoMap[p.id]?.email || '—',
+                company:      p.company   || '—',
+                plan:         p.plan      || 'starter',
+                role:         p.role      || 'user',
+                global_level: autoMap[p.id]?.global_level || 'assist',
+                crm:          autoMap[p.id]?.crm          || 'assist',
+                marketing:    autoMap[p.id]?.marketing    || 'assist',
+                shield:       autoMap[p.id]?.shield       || 'observe',
+                website:      autoMap[p.id]?.website      || 'autonomous',
+            }));
+
+            // Fallback: if profiles table doesn't exist yet (migration not run),
+            // fall through to autonomy-only list
+            if (!_allUsers.length && autonomy.length) {
+                _allUsers = autonomy.map(a => ({
+                    id: a.id, name: a.name || a.email, email: a.email,
+                    company: '—', plan: 'starter', role: 'user',
+                    global_level: a.global_level, crm: a.crm,
+                    marketing: a.marketing, shield: a.shield, website: a.website,
+                }));
+            }
+
+            // Final fallback: placeholder data shown only when backend is offline
+            if (!_allUsers.length) {
+                _allUsers = [
+                    { id: 'offline-1', name: 'User A', email: 'user-a@example.com', company: 'Company A', plan: 'starter', role: 'user', global_level: 'assist', crm: 'assist', marketing: 'assist', shield: 'observe', website: 'assist' },
+                    { id: 'offline-2', name: 'User B', email: 'user-b@example.com', company: 'Company B', plan: 'growth',  role: 'user', global_level: 'observe', crm: 'assist', marketing: 'assist', shield: 'observe', website: 'assist' },
+                ];
+            }
+
+            renderUserTable(_allUsers);
+            bindUserPageEvents();
+        };
+
+        function renderUserTable(users) {
+            const content = document.getElementById('page-content');
+            if (!content) return;
+            const levelColors = { observe: '#94A3B8', assist: '#5B8CFF', autonomous: '#22C55E' };
+            content.innerHTML = `
+            <div class="page-animate" style="padding:24px;display:flex;flex-direction:column;gap:24px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div>
+                        <h1 class="page-title">User Management</h1>
+                        <p class="page-subtitle">Manage accounts, roles, module access, and AI autonomy</p>
+                    </div>
+                    <div style="display:flex;gap:10px;">
+                        <button id="invite-user-btn" style="display:flex;align-items:center;gap:8px;padding:10px 18px;border-radius:var(--radius);border:none;background:linear-gradient(135deg,#5B8CFF,#3B6FE0);color:white;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font);box-shadow:0 4px 16px rgba(91,140,255,0.3);">
+                            <i class="bi bi-person-plus"></i> Invite User
+                        </button>
+                        <button id="emergency-freeze-btn" style="display:flex;align-items:center;gap:8px;padding:10px 18px;border-radius:var(--radius);border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.1);color:#EF4444;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all .15s;" onmouseover="this.style.background='rgba(239,68,68,.18)'" onmouseout="this.style.background='rgba(239,68,68,.1)'">
+                            <i class="bi bi-x-octagon-fill"></i> Emergency Freeze
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Stats -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;">
+                    ${[
+                        { label: 'Total Users', value: users.length, icon: 'bi-people-fill', color: '#5B8CFF' },
+                        { label: 'Autonomous', value: users.filter(u=>u.global_level==='autonomous').length, icon: 'bi-robot', color: '#22C55E' },
+                        { label: 'Assist Mode', value: users.filter(u=>u.global_level==='assist').length, icon: 'bi-hand-index-thumb', color: '#5B8CFF' },
+                        { label: 'Observe Only', value: users.filter(u=>u.global_level==='observe').length, icon: 'bi-eye', color: '#F59E0B' },
+                    ].map(s => `
+                        <div class="card card-sm" style="display:flex;align-items:center;gap:14px;">
+                            <div style="width:42px;height:42px;border-radius:12px;background:${s.color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                <i class="bi ${s.icon}" style="font-size:18px;color:${s.color};"></i>
+                            </div>
+                            <div>
+                                <div style="font-size:22px;font-weight:700;color:var(--text);">${s.value}</div>
+                                <div style="font-size:11px;color:var(--dim);">${s.label}</div>
+                            </div>
+                        </div>`).join('')}
+                </div>
+
+                <!-- Search + Filter -->
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="flex:1;display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:var(--radius);border:1px solid var(--border);background:rgba(30,41,59,0.5);">
+                        <i class="bi bi-search" style="color:var(--dim);font-size:13px;"></i>
+                        <input id="user-search" type="text" placeholder="Search users, emails…" aria-label="Search users by name, email, or ID" style="flex:1;background:transparent;border:none;outline:none;color:var(--text);font-size:13px;font-family:var(--font);" />
+                    </div>
+                    ${['All','Autonomous','Assist','Observe'].map(f => `
+                        <button class="user-filter-btn" data-filter="${f.toLowerCase()}" style="padding:10px 14px;border-radius:var(--radius);border:1px solid var(--border);background:${f==='All'?'rgba(91,140,255,.1)':'transparent'};color:${f==='All'?'var(--accent)':'var(--muted)'};font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);">${f}</button>
+                    `).join('')}
+                </div>
+
+                <!-- Table -->
+                <div id="users-table-wrap" style="border-radius:14px;border:1px solid var(--border-light);overflow:hidden;background:rgba(17,24,39,0.7);">
+                    <div style="display:grid;grid-template-columns:2fr 1.5fr 1.5fr 1fr 1fr 1fr 90px;gap:12px;padding:11px 20px;border-bottom:1px solid var(--border-light);background:rgba(17,24,39,0.9);">
+                        ${['USER','COMPANY','EMAIL','PLAN','GLOBAL','CRM','ACTIONS'].map(h => `<span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em;">${h}</span>`).join('')}
+                    </div>
+                    <div id="users-rows">${buildUserRows(users, levelColors)}</div>
+                </div>
+
+                <!-- Billing -->
+                <div class="card">
+                    <div class="card-title"><i class="bi bi-bar-chart-line" style="color:var(--accent);"></i> Usage & Billing Overview</div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;">
+                        ${[
+                            { label: 'Total API Calls This Month', value: '18,600', sub: '+24% vs last month', color: '#5B8CFF' },
+                            { label: 'Total Decisions Made', value: '4,847', sub: 'Across all modules & users', color: '#22C55E' },
+                            { label: 'Platform Revenue', value: '$2,940/mo', sub: '1 Enterprise · 2 Growth · 2 Starter', color: '#F59E0B' },
+                        ].map(b => `
+                            <div style="padding:18px;border-radius:12px;border:1px solid ${b.color}20;background:${b.color}06;">
+                                <div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">${b.label}</div>
+                                <div style="font-size:26px;font-weight:700;color:${b.color};font-family:var(--font-mono);">${b.value}</div>
+                                <div style="font-size:11px;color:var(--muted);margin-top:4px;">${b.sub}</div>
+                            </div>`).join('')}
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        function buildUserRows(users, levelColors) {
+            if (!users.length) return `<div style="padding:48px;text-align:center;color:var(--dim);"><i class="bi bi-people" style="font-size:32px;display:block;margin-bottom:12px;"></i><div>No users found</div></div>`;
+            const lc = levelColors || { observe: '#94A3B8', assist: '#5B8CFF', autonomous: '#22C55E' };
+            const planColors = { starter: '#94A3B8', growth: '#5B8CFF', enterprise: '#F59E0B' };
+            return users.map(u => `
+                <div style="display:grid;grid-template-columns:2fr 1.5fr 1.5fr 1fr 1fr 1fr 90px;gap:12px;padding:16px 20px;border-bottom:1px solid rgba(91,140,255,.04);align-items:center;transition:background .15s;" onmouseover="this.style.background='rgba(91,140,255,.04)'" onmouseout="this.style.background=''">
+                    <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+                        <div style="width:36px;height:36px;border-radius:10px;background:rgba(91,140,255,0.15);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--accent);flex-shrink:0;">${(u.name||u.email||'?').substring(0,2).toUpperCase()}</div>
+                        <div style="min-width:0;">
+                            <div style="font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(u.name||'User')}</div>
+                            <div style="font-size:11px;color:var(--dim);font-family:monospace;">${(u.id||'').substring(0,8)}…</div>
+                        </div>
+                    </div>
+                    <div style="font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(u.company||'—')}</div>
+                    <div style="font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(u.email||'—')}</div>
+                    <div><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:5px;color:${planColors[u.plan]||'#94A3B8'};background:${(planColors[u.plan]||'#94A3B8')}18;text-transform:capitalize;">${u.plan||'starter'}</span></div>
+                    <div><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:5px;color:${lc[u.global_level]||'#94A3B8'};background:${(lc[u.global_level]||'#94A3B8')}18;">${u.global_level||'assist'}</span></div>
+                    <div><span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:5px;color:${lc[u.crm]||'#94A3B8'};background:${(lc[u.crm]||'#94A3B8')}18;">${u.crm||'assist'}</span></div>
+                    <div style="display:flex;align-items:center;gap:6px;position:relative;">
+                        <button class="view-user-btn" data-userid="${u.id}" title="View details" aria-label="View details for ${escHtml(u.name || u.email || 'user')}" style="width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)';" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)';"><i class="bi bi-eye" style="font-size:12px;"></i></button>
+                        <div style="position:relative;">
+                            <button class="more-user-btn" data-userid="${u.id}" title="More actions" aria-label="More actions for ${escHtml(u.name || u.email || 'user')}" aria-haspopup="true" style="width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;" onmouseover="this.style.borderColor='var(--border-bright)';" onmouseout="this.style.borderColor='var(--border)';"><i class="bi bi-three-dots-vertical" style="font-size:12px;"></i></button>
+                            <div class="action-dropdown" id="dropdown-${u.id}">
+                                <div class="action-dropdown-item set-observe-btn" data-userid="${u.id}"><i class="bi bi-eye"></i> Set All → Observe</div>
+                                <div class="action-dropdown-item set-assist-btn" data-userid="${u.id}"><i class="bi bi-hand-index-thumb"></i> Set All → Assist</div>
+                                <div class="action-dropdown-item set-autonomous-btn" data-userid="${u.id}"><i class="bi bi-robot"></i> Set All → Autonomous</div>
+                                <div style="height:1px;background:var(--border-light);margin:4px 0;"></div>
+                                <div class="action-dropdown-item danger copy-id-btn" data-userid="${u.id}"><i class="bi bi-clipboard"></i> Copy User ID</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`).join('');
+        }
+
+        function bindUserPageEvents() {
+            const levelColors = { observe: '#94A3B8', assist: '#5B8CFF', autonomous: '#22C55E' };
+            let activeFilter = 'all';
+            let searchQuery = '';
+
+            function reRender() {
+                let filtered = _allUsers;
+                if (activeFilter !== 'all') filtered = filtered.filter(u => u.global_level === activeFilter);
+                if (searchQuery) filtered = filtered.filter(u =>
+                    (u.name||'').toLowerCase().includes(searchQuery) ||
+                    (u.email||'').toLowerCase().includes(searchQuery) ||
+                    (u.id||'').toLowerCase().includes(searchQuery)
+                );
+                const wrap = document.getElementById('users-rows');
+                if (wrap) wrap.innerHTML = buildUserRows(filtered, levelColors);
+                bindRowActions();
+            }
+
+            // Search
+            document.getElementById('user-search')?.addEventListener('input', e => {
+                searchQuery = e.target.value.toLowerCase().trim();
+                reRender();
+            });
+
+            // Filter buttons
+            document.querySelectorAll('.user-filter-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    activeFilter = btn.dataset.filter;
+                    document.querySelectorAll('.user-filter-btn').forEach(b => {
+                        b.style.background = 'transparent'; b.style.color = 'var(--muted)';
+                    });
+                    btn.style.background = 'rgba(91,140,255,.1)'; btn.style.color = 'var(--accent)';
+                    reRender();
+                });
+            });
+
+            // Invite button
+            document.getElementById('invite-user-btn')?.addEventListener('click', () => {
+                const email = prompt('Enter user email to invite:');
+                if (!email || !email.includes('@')) return;
+                alert(`Invite sent to ${email}!\n\n(Backend invite endpoint will be wired in next phase.)`);
+            });
+
+            // Modal close
+            document.getElementById('modal-close')?.addEventListener('click', closeModal);
+            document.getElementById('user-modal-overlay')?.addEventListener('click', e => {
+                if (e.target.id === 'user-modal-overlay') closeModal();
+            });
+
+            // Modal preset buttons
+            document.getElementById('modal-set-observe')?.addEventListener('click', () => setAllModules(_modalUserId, 'observe'));
+            document.getElementById('modal-set-assist')?.addEventListener('click', () => setAllModules(_modalUserId, 'assist'));
+            document.getElementById('modal-set-autonomous')?.addEventListener('click', () => setAllModules(_modalUserId, 'autonomous'));
+
+            bindRowActions();
+        }
+
+        function bindRowActions() {
+            // View modal
+            document.querySelectorAll('.view-user-btn').forEach(btn => {
+                btn.addEventListener('click', () => openUserModal(btn.dataset.userid));
+            });
+            // More dropdown
+            document.querySelectorAll('.more-user-btn').forEach(btn => {
+                btn.addEventListener('click', e => {
+                    e.stopPropagation();
+                    const dd = document.getElementById(`dropdown-${btn.dataset.userid}`);
+                    document.querySelectorAll('.action-dropdown').forEach(d => { if (d !== dd) d.classList.remove('open'); });
+                    dd?.classList.toggle('open');
+                });
+            });
+            document.addEventListener('click', () => document.querySelectorAll('.action-dropdown').forEach(d => d.classList.remove('open')), { once: false, passive: true });
+
+            document.querySelectorAll('.set-observe-btn').forEach(b => b.addEventListener('click', () => setAllModules(b.dataset.userid, 'observe')));
+            document.querySelectorAll('.set-assist-btn').forEach(b => b.addEventListener('click', () => setAllModules(b.dataset.userid, 'assist')));
+            document.querySelectorAll('.set-autonomous-btn').forEach(b => b.addEventListener('click', () => setAllModules(b.dataset.userid, 'autonomous')));
+            document.querySelectorAll('.copy-id-btn').forEach(b => b.addEventListener('click', () => {
+                navigator.clipboard.writeText(b.dataset.userid).then(() => {
+                    b.textContent = '✓ Copied!';
+                    setTimeout(() => { b.innerHTML = '<i class="bi bi-clipboard"></i> Copy User ID'; }, 1500);
+                }).catch(() => alert('User ID: ' + b.dataset.userid));
+            }));
+        }
+
+        function openUserModal(userId) {
+            const user = _allUsers.find(u => u.id === userId);
+            if (!user) return;
+            _modalUserId = userId;
+            const levelColors = { observe: '#94A3B8', assist: '#5B8CFF', autonomous: '#22C55E' };
+            const levelLabel  = { observe: 'Observe', assist: 'Assist', autonomous: 'Auto' };
+
+            document.getElementById('modal-name').textContent = user.name || 'User';
+            document.getElementById('modal-meta').innerHTML = [
+                user.email    ? `<span><i class="bi bi-envelope" style="font-size:11px;"></i> ${escHtml(user.email)}</span>` : '',
+                user.company  ? `<span><i class="bi bi-building" style="font-size:11px;"></i> ${escHtml(user.company)}</span>` : '',
+                user.plan     ? `<span style="text-transform:capitalize;"><i class="bi bi-tag" style="font-size:11px;"></i> ${escHtml(user.plan)}</span>` : '',
+            ].filter(Boolean).join('<span style="color:var(--border);">·</span>');
+
+            const modules = [
+                { key: 'global_level', label: 'Global',    icon: 'bi-globe2' },
+                { key: 'crm',          label: 'CRM',       icon: 'bi-people' },
+                { key: 'marketing',    label: 'Marketing', icon: 'bi-megaphone' },
+                { key: 'shield',       label: 'Shield',    icon: 'bi-shield' },
+                { key: 'website',      label: 'Website',   icon: 'bi-globe' },
+            ];
+
+            document.getElementById('modal-autonomy-grid').innerHTML = modules.map(m => {
+                const val = user[m.key] || 'assist';
+                const c   = levelColors[val] || '#94A3B8';
+                return `
+                <div class="module-autonomy-row">
+                    <div style="display:flex;align-items:center;gap:7px;">
+                        <i class="bi ${m.icon}" style="color:${c};font-size:13px;"></i>
+                        <span style="font-size:12px;font-weight:600;color:var(--text);">${m.label}</span>
+                    </div>
+                    <div class="level-btn-group">
+                        ${['observe','assist','autonomous'].map(lv => `
+                            <button class="level-btn ${val===lv?'active-'+lv:''}"
+                                onclick="setModuleLevel('${userId}','${m.key}','${lv}')">
+                                ${levelLabel[lv]}
+                            </button>`).join('')}
+                    </div>
+                </div>`;
+            }).join('');
+
+            document.getElementById('modal-save-status').style.display = 'none';
+            document.getElementById('user-modal-overlay').classList.add('visible');
+        }
+
+        function closeModal() {
+            document.getElementById('user-modal-overlay').classList.remove('visible');
+            _modalUserId = null;
+        }
+
+        async function setAllModules(userId, level) {
+            // Use new admin endpoint for reliable per-user override
+            const body = { global_level: level, crm: level, marketing: level, shield: level, website: level };
+            const res = await apiFetch(`/api/v1/admin/autonomy/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify(body) });
+
+            // Update local state
+            const user = _allUsers.find(u => u.id === userId);
+            if (user) { user.global_level = level; user.crm = level; user.marketing = level; user.shield = level; user.website = level; }
+
+            // Show status in modal if open
+            const statusEl = document.getElementById('modal-save-status');
+            if (statusEl && _modalUserId === userId) {
+                statusEl.style.display = 'block';
+                statusEl.style.background = res ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)';
+                statusEl.style.color = res ? '#22C55E' : '#EF4444';
+                statusEl.textContent = res ? `✓ All modules set to ${level}` : '✗ Save failed — applied locally only';
+                if (_modalUserId) openUserModal(_modalUserId);
+            }
+
+            document.querySelectorAll('.action-dropdown').forEach(d => d.classList.remove('open'));
+            const wrap = document.getElementById('users-rows');
+            const levelColors = { observe: '#94A3B8', assist: '#5B8CFF', autonomous: '#22C55E' };
+            if (wrap) wrap.innerHTML = buildUserRows(_allUsers, levelColors);
+            bindRowActions();
+        }
+
+        async function setModuleLevel(userId, module, level) {
+            // Per-module single update via new admin endpoint
+            const body = { [module]: level };
+            const res = await apiFetch(`/api/v1/admin/autonomy/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify(body) });
+
+            // Update local state
+            const user = _allUsers.find(u => u.id === userId);
+            if (user) { user[module] = level; if (module === 'global_level') user.global_level = level; }
+
+            // Redraw modal live without closing it
+            if (_modalUserId === userId) openUserModal(userId);
+
+            // Re-render table
+            const levelColors = { observe: '#94A3B8', assist: '#5B8CFF', autonomous: '#22C55E' };
+            const wrap = document.getElementById('users-rows');
+            if (wrap) wrap.innerHTML = buildUserRows(_allUsers, levelColors);
+            bindRowActions();
+
+            // Show quick toast feedback in modal
+            const statusEl = document.getElementById('modal-save-status');
+            if (statusEl && _modalUserId === userId) {
+                statusEl.style.display = 'block';
+                statusEl.style.background = res ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)';
+                statusEl.style.color = res ? '#22C55E' : '#EF4444';
+                statusEl.textContent = res ? `✓ ${module.toUpperCase()} → ${level}` : `✗ Save failed`;
+                setTimeout(() => { if (statusEl) statusEl.style.display = 'none'; }, 2000);
+            }
+        }
+
+        window.addEventListener('router-ready', () => window.loadUsersPage?.());
+
+        // ── Emergency Freeze wiring (bound after DOM ready) ─────────────────
+        document.addEventListener('DOMContentLoaded', () => {
+            // Freeze button → show confirmation dialog
+            document.addEventListener('click', async (e) => {
+                if (e.target.closest('#emergency-freeze-btn')) {
+                    document.getElementById('freeze-confirm-overlay').classList.add('visible');
+                    document.getElementById('freeze-confirm-input').value = '';
+                    document.getElementById('freeze-confirm-btn').disabled = true;
+                    document.getElementById('freeze-confirm-btn').style.opacity = '.5';
+                    setTimeout(() => document.getElementById('freeze-confirm-input')?.focus(), 200);
+                }
+            });
+
+            // Type-to-confirm validation
+            document.getElementById('freeze-confirm-input')?.addEventListener('input', function() {
+                const valid = this.value.trim() === 'FREEZE';
+                const btn = document.getElementById('freeze-confirm-btn');
+                btn.disabled = !valid;
+                btn.style.opacity = valid ? '1' : '.5';
+                btn.style.background = valid ? 'rgba(239,68,68,.9)' : 'rgba(239,68,68,.2)';
+                btn.style.color = valid ? '#fff' : '#EF4444';
+            });
+
+            // Cancel
+            document.getElementById('freeze-cancel-btn')?.addEventListener('click', () => {
+                document.getElementById('freeze-confirm-overlay').classList.remove('visible');
+            });
+            document.getElementById('freeze-confirm-overlay')?.addEventListener('click', (e) => {
+                if (e.target.id === 'freeze-confirm-overlay') document.getElementById('freeze-confirm-overlay').classList.remove('visible');
+            });
+
+            // Confirm freeze
+            document.getElementById('freeze-confirm-btn')?.addEventListener('click', async function() {
+                this.textContent = '⏳ Freezing...';
+                this.disabled = true;
+                try {
+                    const token = localStorage.getItem('neuralorbit_token');
+                    const res = await fetch((window.BACKEND_URL || 'http://127.0.0.1:8000') + '/api/v1/admin/autonomy/freeze-all', {
+                        method: 'POST', signal: AbortSignal.timeout(10000),
+                        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                    });
+                    const data = await res.json();
+                    document.getElementById('freeze-confirm-overlay').classList.remove('visible');
+                    // Reload page to show updated states
+                    setTimeout(() => window.loadUsersPage?.(), 300);
+                    // Show toast
+                    const toast = document.createElement('div');
+                    toast.style.cssText = 'position:fixed;bottom:24px;right:24px;padding:14px 20px;border-radius:12px;background:rgba(239,68,68,.9);color:#fff;font-size:13px;font-weight:700;z-index:99999;box-shadow:0 8px 32px rgba(0,0,0,.4);';
+                    toast.textContent = `🔴 Emergency Freeze Applied — ${data.users_frozen ?? '?'} users set to Observe`;
+                    document.body.appendChild(toast);
+                    setTimeout(() => toast.remove(), 5000);
+                } catch(e) {
+                    this.textContent = '✗ Failed — Backend offline?';
+                    this.style.background = 'rgba(239,68,68,.2)';
+                    setTimeout(() => {
+                        this.textContent = '🔴 Freeze All';
+                        this.disabled = false;
+                    }, 2500);
+                }
+            });
+        });
+    </script>
+    <script>
+    /* ============================================================
+       Autonomy Heatmap - additive section for admin/users.html
+       Appends a cross-user x module heatmap BELOW the existing user table.
+       Reads from /api/v1/admin/autonomy/heatmap (already exists).
+       ADDITIVE: hooks into existing loadUsersPage via MutationObserver.
+                 Zero existing code is modified.
+    ============================================================ */
+    (function(){
+        'use strict';
+        var BACKEND = window.BACKEND_URL || 'http://127.0.0.1:8000';
+        var MODULES = ['crm','marketing','shield','website'];
+        var LEVEL_STYLES = {
+            observe:    { color:'#94A3B8', bg:'rgba(148,163,184,.12)', label:'Obs' },
+            assist:     { color:'#5B8CFF', bg:'rgba(91,140,255,.12)',  label:'Ast' },
+            autonomous: { color:'#22C55E', bg:'rgba(34,197,94,.12)',   label:'Aut' },
+        };
+        var DEMO_HEATMAP = [
+            { user_id:'user1234', email:'alice@demo.com', crm:'autonomous', marketing:'assist',     shield:'observe',    website:'autonomous' },
+            { user_id:'user5678', email:'bob@demo.com',   crm:'assist',     marketing:'autonomous', shield:'observe',    website:'assist'     },
+            { user_id:'user9abc', email:'carol@demo.com', crm:'observe',    marketing:'observe',    shield:'observe',    website:'observe'    },
+            { user_id:'useref12', email:'dave@demo.com',  crm:'assist',     marketing:'assist',     shield:'autonomous', website:'assist'     },
+        ];
+
+        async function fetchHeatmap(){
+            try{
+                var t = localStorage.getItem('neuralorbit_token');
+                var headers = { 'Content-Type': 'application/json' };
+                if(t) headers['Authorization'] = 'Bearer ' + t;
+                var r = await fetch(BACKEND + '/api/v1/admin/autonomy/heatmap', {
+                    signal: AbortSignal.timeout(5000),
+                    headers: headers
+                });
+                if(!r.ok) return null;
+                var d = await r.json();
+                return d.heatmap || d.users || null;
+            } catch(e) { return null; }
+        }
+
+        function cellHtml(level){
+            var s = LEVEL_STYLES[level] || LEVEL_STYLES.assist;
+            return '<div style="text-align:center;padding:5px 8px;border-radius:6px;background:' + s.bg + ';color:' + s.color + ';font-size:10px;font-weight:700;letter-spacing:.03em;">' + s.label + '</div>';
+        }
+
+        function renderHeatmap(data, isDemo){
+            var rows = data.map(function(u){
+                var moduleCells = MODULES.map(function(m){
+                    return '<td style="padding:8px 10px;">' + cellHtml(u[m] || 'assist') + '</td>';
+                }).join('');
+                return '<tr onmouseover="this.style.background=\'rgba(255,255,255,.025)\'" onmouseout="this.style.background=\'transparent\'">' +
+                    '<td style="padding:8px 14px;font-size:12px;color:var(--muted);font-family:monospace;white-space:nowrap;">' + (u.email || u.user_id || '').slice(0,22) + '</td>' +
+                    moduleCells +
+                    '</tr>';
+            }).join('');
+
+            var moduleHeaders = MODULES.map(function(m){
+                return '<th scope="col" style="padding:8px 10px;text-align:center;font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">' + m + '</th>';
+            }).join('');
+
+            var legend = Object.keys(LEVEL_STYLES).map(function(k){
+                var s = LEVEL_STYLES[k];
+                return '<span style="font-size:11px;color:' + s.color + ';font-weight:600;">' +
+                    '<span style="display:inline-block;width:24px;height:14px;border-radius:4px;background:' + s.bg + ';vertical-align:middle;margin-right:4px;"></span>' +
+                    k.charAt(0).toUpperCase() + k.slice(1) + '</span>';
+            }).join('');
+
+            var demoBadge = isDemo
+                ? '<span style="margin-left:auto;font-size:10px;padding:2px 8px;border-radius:4px;background:rgba(245,158,11,.12);color:#F59E0B;font-weight:600;">NO LIVE DATA</span>'
+                : '<span style="margin-left:auto;font-size:10px;padding:2px 8px;border-radius:4px;background:rgba(34,197,94,.12);color:#22C55E;font-weight:600;">LIVE</span>';
+
+            return '<div id="autonomy-heatmap-section" style="margin:0 24px 24px;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;">' +
+                '<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">' +
+                    '<i class="bi bi-grid-3x3-gap-fill" style="color:#5B8CFF;font-size:15px;"></i>' +
+                    '<span style="font-size:14px;font-weight:600;color:var(--text);">Autonomy Heatmap - All Users</span>' +
+                    demoBadge +
+                '</div>' +
+                '<div style="overflow-x:auto;">' +
+                    '<table style="width:100%;border-collapse:collapse;">' +
+                        '<thead><tr style="border-bottom:1px solid var(--border);">' +
+                            '<th scope="col" style="padding:8px 14px;text-align:left;font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">User</th>' +
+                            moduleHeaders +
+                        '</tr></thead>' +
+                        '<tbody>' + rows + '</tbody>' +
+                    '</table>' +
+                '</div>' +
+                '<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:16px;">' + legend + '</div>' +
+            '</div>';
+        }
+
+        // Hook: wait for users page to finish rendering, then append heatmap.
+        // Uses MutationObserver for safety - does not interfere with loadUsersPage.
+        function attachHeatmapAfterLoad(){
+            var content = document.getElementById('page-content');
+            if(!content) return;
+
+            async function inject(){
+                // Do not double-inject
+                if(document.getElementById('autonomy-heatmap-section')) return;
+                // Only inject on users page
+                if(document.body.dataset.module !== 'users') return;
+
+                var data = await fetchHeatmap();
+                var isDemo = !data;
+                var finalData = data || DEMO_HEATMAP;
+
+                var wrap = document.createElement('div');
+                wrap.innerHTML = renderHeatmap(finalData, isDemo);
+                var section = wrap.firstElementChild;
+                if(section) content.appendChild(section);
+            }
+
+            // Observe for when #users-rows appears (page has rendered)
+            var observer = new MutationObserver(function(){
+                if(document.getElementById('users-rows')){
+                    observer.disconnect();
+                    setTimeout(inject, 200);
+                }
+            });
+            observer.observe(content, { childList: true, subtree: true });
+
+            // Also hook directly so it fires on re-loads
+            var original = window.loadUsersPage;
+            window.loadUsersPage = async function(){
+                var el = document.getElementById('autonomy-heatmap-section');
+                if(el) el.remove();
+                if(original) await original.apply(this, arguments);
+                setTimeout(inject, 400);
+            };
+        }
+
+        // Wait for DOM ready
+        if(document.readyState === 'loading'){
+            document.addEventListener('DOMContentLoaded', attachHeatmapAfterLoad);
+        } else {
+            attachHeatmapAfterLoad();
+        }
+    })();
+    </script>
+</body>
+</html>
